@@ -1,124 +1,142 @@
 # FORGE
 
-> **Foundation Of Resilience, Growth & Excellence**
+<p align="center">
+  <img src="public/image/logo.png" width="180">
+</p>
 
-FORGE is a competitive community web application that transforms learning, character development, and community interaction into a real-time multiplayer quiz experience.
+<h1 align="center">
+Foundation Of Resilience, Growth & Excellence
+</h1>
 
-Players challenge one another in knowledge duels, earn Forge Points (FP), unlock achievements, maintain Fire Streaks, and compete on weekly leaderboards.
+<p align="center">
+
+Real-time Multiplayer Community Quiz Platform
+
+</p>
 
 ---
 
-## Features
+# About
 
-### Multiplayer Duel
+FORGE adalah platform komunitas berbasis web yang menggabungkan pembelajaran, kompetisi, dan pembangunan karakter melalui sistem duel pengetahuan secara realtime.
 
-* Real-time 1 vs 1 duel
-* Duel invitation system
-* Accept / Reject invitation (10 second timeout)
-* Live answer synchronization
-* Countdown timer
-* Result animation
+Peserta dapat saling menantang duel, memperoleh Forge Points (FP), mempertahankan Fire Streak, membuka Achievement Badge, serta bersaing di Weekly Leaderboard.
 
-### Forge Points (FP)
+---
 
-* Dynamic FP calculation
-* Maximum 100 FP per duel
-* Bonus based on:
+# Features
 
-  * Correct answers
-  * Remaining answer time
+## Multiplayer Duel
 
-### Fire Streak
+- Real-time 1 vs 1 Duel
+- Duel Invitation
+- Accept / Reject (10s timeout)
+- Live Score Sync
+- 5 Questions
+- Countdown Timer
+- Confetti Victory
+- Lose Sound Effect
 
-Maintain consecutive active duel days.
+---
 
-* Daily streak
-* Animated flame
-* Weekly statistics
+## Forge Points (FP)
 
-### Leaderboard
+Perhitungan FP berdasarkan:
 
-* Weekly Ranking
-* Lifetime Ranking
-* Hall of Legends
-* Weekly Champion Recap
+- Jawaban benar
+- Kecepatan menjawab
 
-### Achievement Badges
+Maximum
 
-Unlock badges by completing milestones.
+```
+100 FP / Duel
+```
 
-Examples:
+---
 
-* First Duel
-* First Victory
-* Win Streak
-* Fire Streak
-* Weekly Champion
-* Lifetime FP
+## Fire Streak
 
-### Question System
+- Daily Active Streak
+- Weekly Tracking
+- Animated Flame
 
-Supports:
+---
 
-* Text Questions
-* Image Questions
+## Leaderboard
 
-Question categories include:
+- Weekly Ranking
+- Lifetime Ranking
+- Hall of Legends
 
-* Bible
-* Geography
-* Technology
-* Mathematics
-* Psychology
-* Economy
-* General Knowledge
-* Leadership
-* Moral & Character
-* Health
-* Reflection
+---
 
-### Community
+## Achievement Badge
 
-Members can:
+Unlock badge berdasarkan:
 
-* View other members
-* Add Favourite
-* Add Friend
-* Invite Duel
+- Duel
+- Win
+- FP
+- Fire Streak
+- Weekly Champion
 
-### User Profile
+---
 
-Each account contains:
+## Question Types
 
-* Given ID
-* Username
-* Avatar
-* Gender
-* City
-* Weekly FP
-* Lifetime FP
-* Statistics
+Supported
 
-### Audio
+- Text Question
+- Image Question
 
-Background music automatically changes:
+Categories
 
-* Idle Mode
-* Duel Mode
+- Bible
+- Geography
+- Mathematics
+- Technology
+- Psychology
+- Economy
+- Health
+- Leadership
+- Moral
+- General Knowledge
+- Reflection
 
-Sound effects:
+---
 
-* Victory
-* Defeat
-* Notifications
+## Community
 
-### Progressive Web App (PWA)
+Member dapat
 
-Supports:
+- Favorite
+- Friend
+- Duel
+- Online Status
 
-* Add to Home Screen
-* Mobile friendly
-* Install like a native app
+---
+
+## Audio
+
+Background Music
+
+- Idle Mode
+- Duel Mode
+
+Sound Effects
+
+- Victory
+- Lose
+- Notification
+
+---
+
+## Progressive Web App
+
+- Add To Home Screen
+- Mobile Friendly
+- Responsive
+- Offline Ready (Static Assets)
 
 ---
 
@@ -126,44 +144,73 @@ Supports:
 
 Frontend
 
-* HTML
-* CSS
-* Vanilla JavaScript
+- HTML5
+- CSS3
+- Vanilla JavaScript
 
 Backend
 
-* Vercel Serverless Functions
+- Vercel Serverless Function
 
 Database
 
-* Supabase PostgreSQL
+- Supabase PostgreSQL
 
 Realtime
 
-* Supabase Realtime
+- Supabase Realtime
 
-Deployment
+Hosting
 
-* Vercel
+- Vercel
 
 ---
 
 # Project Structure
 
 ```
-api/
-public/
-supabase/
-scripts/
+forge-community
+│
+├── api
+│   ├── [...path].js          # Main API Router
+│   └── data.js               # Initial Question & Badge Seeder
+│
+├── public
+│   ├── image
+│   ├── sounds
+│   ├── app.js
+│   ├── index.html
+│   ├── manifest.webmanifest
+│   ├── styles.css
+│   └── sw.js
+│
+├── scripts
+│   ├── check-static.mjs
+│   └── local-env.mjs
+│
+├── supabase
+│   ├── schema.sql
+│   ├── realtime-duel-migration.sql
+│   └── weekly-ui-fix-migration.sql
+│
+├── .env.example
+├── .gitignore
+├── package.json
+├── README.md
+└── vercel.json
 ```
 
 ---
 
 # Environment Variables
 
-Create `.env.local`
+Create
 
-```env
+```
+.env.local
+```
+
+```
 SUPABASE_URL=
 
 SUPABASE_SERVICE_ROLE_KEY=
@@ -173,79 +220,130 @@ SUPABASE_ANON_KEY=
 
 ---
 
-# Installation
+# Local Development
 
-Install dependencies
+Install
 
 ```bash
 npm install
 ```
 
-Run locally
-
-```bash
-npm run dev
-```
-
----
-
-# Database
-
 Run
 
-```
-schema.sql
+```bash
+npm run local
 ```
 
-If upgrading an existing database, run migration files instead of recreating the schema.
+Syntax Check
+
+```bash
+npm run check
+```
 
 ---
 
 # Deployment
 
-Push repository to GitHub.
+## GitHub
 
-Import project into Vercel.
+```bash
+git add .
+git commit -m "your message"
+git push
+```
 
-Add Environment Variables.
+---
 
-Deploy.
+## Vercel
+
+Import GitHub Repository
+
+Environment Variables
+
+```
+SUPABASE_URL
+
+SUPABASE_SERVICE_ROLE_KEY
+
+SUPABASE_ANON_KEY
+```
+
+Deploy
+
+---
+
+# Database
+
+New Installation
+
+Run
+
+```
+supabase/schema.sql
+```
+
+Existing Installation
+
+Run only
+
+```
+supabase/realtime-duel-migration.sql
+```
 
 ---
 
 # Gameplay
 
-1. Register
-2. Login
-3. Challenge another member
-4. Answer five questions
-5. Earn Forge Points
-6. Unlock badges
-7. Maintain Fire Streak
-8. Reach Hall of Legends
+Register
+
+↓
+
+Login
+
+↓
+
+Challenge Player
+
+↓
+
+Answer 5 Questions
+
+↓
+
+Earn Forge Points
+
+↓
+
+Unlock Badges
+
+↓
+
+Maintain Fire Streak
+
+↓
+
+Reach Hall of Legends
 
 ---
 
-# Roadmap
+# Future Roadmap
 
-Upcoming features
-
-* Ranked Seasons
-* Spectator Mode
-* Tournament Bracket
-* Daily Missions
-* Guild / Community
-* AI Generated Questions
-* Admin Dashboard
-* Push Notifications
-* Replay Duel
-* Statistics Dashboard
-* Mobile Application (Android & iOS)
+- Tournament Mode
+- Ranked Seasons
+- Replay Duel
+- AI Generated Questions
+- Admin Dashboard
+- Push Notification
+- Guild / Clan
+- Mobile App (Android / iOS)
+- Spectator Mode
+- Daily Mission
+- Seasonal Badge
 
 ---
 
 # License
 
-Private Project
+Private Repository
 
 Copyright © FORGE Community

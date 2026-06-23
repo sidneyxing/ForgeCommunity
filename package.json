@@ -8,7 +8,7 @@
     "local": "vercel dev",
     "start": "vercel dev",
     "deploy": "vercel --prod",
-    "check": "node --check api/[...path].js && node --check api/data.js && node --check api/me.js && node --check api/members.js && node --check api/leaderboard.js && node --check api/badges.js && node --check api/duel-requests.js && node --check api/auth/[action].js && node --check api/me/profile.js && node --check api/me/settings.js && node --check api/members/[id]/relation.js && node --check api/members/[id]/invite.js && node --check api/duel-requests/[id]/respond.js && node --check api/duel/[action].js && node scripts/check-static.mjs"
+    "check": "node --check api/[...path].js && node --check api/data.js && node scripts/check-static.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.86.0"

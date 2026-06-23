@@ -21,9 +21,8 @@ export default async function handler(req, res) {
     await ensureSeedOnce(db);
     await ensureWeeklySeason(db);
 
-    const pathParts = Array.isArray(req.query.path) ? req.query.path : req.query.path ? [req.query.path] : [];
-    const path = `/${pathParts.join("/")}`;
     const method = req.method.toUpperCase();
+    const path = resolveApiPath(req);
 
     if (method === "POST" && path === "/auth/register") return register(req, res, db);
     if (method === "POST" && path === "/auth/login") return login(req, res, db);
@@ -51,6 +50,23 @@ export default async function handler(req, res) {
   } catch (error) {
     return send(res, error.status || 500, { error: error.message || "Server error" });
   }
+}
+
+function resolveApiPath(req) {
+  const urlPath = new URL(req.url || "/", "http://localhost").pathname;
+  const cleanUrlPath = urlPath.replace(/^\/api/, "") || "/";
+
+  if (cleanUrlPath && cleanUrlPath !== "/" && cleanUrlPath !== "/[...path].js") {
+    return cleanUrlPath;
+  }
+
+  const pathParts = Array.isArray(req.query.path)
+    ? req.query.path
+    : req.query.path
+      ? [req.query.path]
+      : [];
+
+  return `/${pathParts.join("/")}`;
 }
 
 function getSupabase() {

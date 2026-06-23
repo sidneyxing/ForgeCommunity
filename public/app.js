@@ -32,6 +32,9 @@ const state = {
   userChannel: null,
   duelChannel: null,
   requestPollTimer: null,
+  requestCountdownTimer: null,
+  currentIncomingRequests: [],
+  currentOutgoingRequests: [],
   duelStatusTimer: null,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
@@ -577,14 +580,17 @@ function startRequestWatcher() {
 async function loadDuelRequests({ notify = false } = {}) {
   if (!state.me) return { requests: [], outgoing: [] };
   const data = await api("/api/duel-requests");
+  const receivedAt = Date.now();
+  const requests = (data.requests || []).map((request) => ({ ...request, received_at_ms: receivedAt }));
+  const outgoing = (data.outgoing || []).map((request) => ({ ...request, received_at_ms: receivedAt }));
   if (notify) {
-    for (const request of data.requests || []) {
+    for (const request of requests) {
       if (!state.seenRequestIds.has(request.id)) {
         state.seenRequestIds.add(request.id);
         toast(`${request.requester_username} mengajak kamu duel. Accept dalam 10 detik.`);
       }
     }
-    for (const request of data.outgoing || []) {
+    for (const request of outgoing) {
       if (request.status === "accepted" && request.duel_id && !state.acceptedRequestIds.has(request.id)) {
         state.acceptedRequestIds.add(request.id);
         const duel = await api(`/api/duel/${request.duel_id}`).catch(() => null);
@@ -595,8 +601,28 @@ async function loadDuelRequests({ notify = false } = {}) {
       }
     }
   }
-  if (state.currentPage === "members") renderRequests(data.requests || [], data.outgoing || []);
-  return data;
+  state.currentIncomingRequests = requests;
+  state.currentOutgoingRequests = outgoing;
+  if (state.currentPage === "members") renderRequests(requests, outgoing);
+  startRequestCountdownTimer();
+  return { ...data, requests, outgoing };
+}
+
+function startRequestCountdownTimer() {
+  clearInterval(state.requestCountdownTimer);
+  const hasPending = [...state.currentIncomingRequests, ...state.currentOutgoingRequests]
+    .some((request) => request.status === "pending" && secondsLeft(request) > 0);
+  if (!hasPending) return;
+  state.requestCountdownTimer = window.setInterval(() => {
+    if (state.currentPage !== "members") return;
+    renderRequests(state.currentIncomingRequests, state.currentOutgoingRequests);
+    const stillPending = [...state.currentIncomingRequests, ...state.currentOutgoingRequests]
+      .some((request) => request.status === "pending" && secondsLeft(request) > 0);
+    if (!stillPending) {
+      clearInterval(state.requestCountdownTimer);
+      state.requestCountdownTimer = null;
+    }
+  }, 1000);
 }
 
 async function loadMembers() {
@@ -688,15 +714,23 @@ function showMemberProfile(row) {
   `;
 }
 
-function secondsLeft(expiresAt) {
-  if (!expiresAt) return 0;
-  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000));
+function secondsLeft(request) {
+  if (!request) return 0;
+  if (typeof request === "string") {
+    return Math.max(0, Math.ceil((new Date(request).getTime() - Date.now()) / 1000));
+  }
+  if (Number.isFinite(Number(request.expires_in_ms))) {
+    const elapsed = Date.now() - Number(request.received_at_ms || Date.now());
+    return Math.max(0, Math.ceil((Number(request.expires_in_ms) - elapsed) / 1000));
+  }
+  if (!request.expires_at) return 0;
+  return Math.max(0, Math.ceil((new Date(request.expires_at).getTime() - Date.now()) / 1000));
 }
 
 function renderRequests(requests, outgoing = []) {
   const incomingHtml = requests.length
     ? requests.map((request) => {
-      const left = secondsLeft(request.expires_at);
+      const left = secondsLeft(request);
       return `
       <article class="request-item">
         <p><strong>${request.requester_username}</strong> mengajak kamu duel.</p>
@@ -711,7 +745,7 @@ function renderRequests(requests, outgoing = []) {
     : `<p class="muted">Belum ada request duel masuk.</p>`;
   const outgoingHtml = outgoing.length
     ? `<div class="outgoing-requests">${outgoing.map((request) => `
-      <small>Invite ke <strong>@${request.target_username}</strong>: ${request.status === "pending" ? `${secondsLeft(request.expires_at)} detik` : request.status}</small>
+      <small>Invite ke <strong>@${request.target_username}</strong>: ${request.status === "pending" ? `${secondsLeft(request)} detik` : request.status}</small>
     `).join("")}</div>`
     : "";
   $("#requestPanel").innerHTML = incomingHtml + outgoingHtml;
@@ -1343,12 +1377,14 @@ function bindEvents() {
     await api("/api/auth/logout", { method: "POST" }).catch(() => {});
     setStoredSessionToken("");
     clearInterval(state.requestPollTimer);
+    clearInterval(state.requestCountdownTimer);
     clearInterval(state.duelStatusTimer);
     if (state.realtimeClient) {
       if (state.userChannel) state.realtimeClient.removeChannel(state.userChannel);
       if (state.duelChannel) state.realtimeClient.removeChannel(state.duelChannel);
     }
     state.requestPollTimer = null;
+    state.requestCountdownTimer = null;
     state.duelStatusTimer = null;
     state.userChannel = null;
     state.duelChannel = null;

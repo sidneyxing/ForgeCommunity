@@ -1,156 +1,251 @@
-# FORGE Arena
+# FORGE
 
-FORGE = Foundation Of Resilience, Growth & Excellence.
+> **Foundation Of Resilience, Growth & Excellence**
 
-Web app duel quiz komunitas dengan login/register nomor WhatsApp, Arena Members, friend/favourite, request duel accept/decline, leaderboard, badges, duel 5 soal x 10 detik, Forge Points, fire streak harian, riwayat duel, sound effect, confetti saat menang, dan efek shake abu saat kalah.
+FORGE is a competitive community web application that transforms learning, character development, and community interaction into a real-time multiplayer quiz experience.
 
-## Stack
+Players challenge one another in knowledge duels, earn Forge Points (FP), unlock achievements, maintain Fire Streaks, and compete on weekly leaderboards.
 
-- Frontend: HTML, CSS, vanilla JavaScript
-- Backend: Vercel Serverless Functions di folder `api/`
-- Database: Supabase Postgres
-- Auth: username/password dengan PBKDF2 hash dan HttpOnly session cookie
-- Deploy target: Vercel
+---
 
-## Struktur penting
+## Features
 
-| File / Folder | Fungsi |
-|---|---|
-| `public/index.html` | Struktur UI FORGE |
-| `public/styles.css` | Style premium FORGE |
-| `public/app.js` | Logic frontend, duel timer, audio, confetti |
-| `api/[...path].js` | Backend API Vercel |
-| `api/data.js` | Seed pertanyaan dan badge awal |
-| `supabase/schema.sql` | Schema database Supabase |
-| `public/sounds/` | Tempat isi sound effect |
-| `public/forge-logo.png` | Logo avatar FORGE |
+### Multiplayer Duel
 
-## Setup Supabase
+* Real-time 1 vs 1 duel
+* Duel invitation system
+* Accept / Reject invitation (10 second timeout)
+* Live answer synchronization
+* Countdown timer
+* Result animation
 
-1. Buka Supabase Dashboard.
-2. Buat project baru.
-3. Masuk ke `SQL Editor`.
-4. Buka file `supabase/schema.sql`, copy semua isinya, lalu klik `Run`.
-5. Masuk `Project Settings > API`.
-6. Simpan dua data ini:
-   - `Project URL`
-   - `service_role key`
+### Forge Points (FP)
 
-Penting: `service_role key` hanya boleh disimpan di environment variable Vercel/server. Jangan taruh di `public/`, HTML, CSS, atau JavaScript frontend.
+* Dynamic FP calculation
+* Maximum 100 FP per duel
+* Bonus based on:
 
-## Setup local
+  * Correct answers
+  * Remaining answer time
 
-1. Install Node.js LTS.
-2. Buka terminal di folder project ini.
-3. Install dependency:
+### Fire Streak
+
+Maintain consecutive active duel days.
+
+* Daily streak
+* Animated flame
+* Weekly statistics
+
+### Leaderboard
+
+* Weekly Ranking
+* Lifetime Ranking
+* Hall of Legends
+* Weekly Champion Recap
+
+### Achievement Badges
+
+Unlock badges by completing milestones.
+
+Examples:
+
+* First Duel
+* First Victory
+* Win Streak
+* Fire Streak
+* Weekly Champion
+* Lifetime FP
+
+### Question System
+
+Supports:
+
+* Text Questions
+* Image Questions
+
+Question categories include:
+
+* Bible
+* Geography
+* Technology
+* Mathematics
+* Psychology
+* Economy
+* General Knowledge
+* Leadership
+* Moral & Character
+* Health
+* Reflection
+
+### Community
+
+Members can:
+
+* View other members
+* Add Favourite
+* Add Friend
+* Invite Duel
+
+### User Profile
+
+Each account contains:
+
+* Given ID
+* Username
+* Avatar
+* Gender
+* City
+* Weekly FP
+* Lifetime FP
+* Statistics
+
+### Audio
+
+Background music automatically changes:
+
+* Idle Mode
+* Duel Mode
+
+Sound effects:
+
+* Victory
+* Defeat
+* Notifications
+
+### Progressive Web App (PWA)
+
+Supports:
+
+* Add to Home Screen
+* Mobile friendly
+* Install like a native app
+
+---
+
+# Tech Stack
+
+Frontend
+
+* HTML
+* CSS
+* Vanilla JavaScript
+
+Backend
+
+* Vercel Serverless Functions
+
+Database
+
+* Supabase PostgreSQL
+
+Realtime
+
+* Supabase Realtime
+
+Deployment
+
+* Vercel
+
+---
+
+# Project Structure
+
+```
+api/
+public/
+supabase/
+scripts/
+```
+
+---
+
+# Environment Variables
+
+Create `.env.local`
+
+```env
+SUPABASE_URL=
+
+SUPABASE_SERVICE_ROLE_KEY=
+
+SUPABASE_ANON_KEY=
+```
+
+---
+
+# Installation
+
+Install dependencies
 
 ```bash
 npm install
 ```
 
-4. Buat file `.env.local` dari contoh:
-
-```bash
-cp .env.example .env.local
-```
-
-Di Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env.local
-```
-
-5. Isi `.env.local`:
-
-```text
-SUPABASE_URL=https://PROJECT_ID.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=SERVICE_ROLE_KEY_KAMU
-```
-
-6. Cek project:
-
-```bash
-npm run check
-```
-
-7. Jalankan local:
+Run locally
 
 ```bash
 npm run dev
 ```
 
-Biasanya app terbuka di `http://localhost:3000`.
+---
 
-## Deploy ke Vercel
+# Database
 
-Cara termudah:
+Run
 
-1. Buka Vercel Dashboard.
-2. Klik `Add New > Project`.
-3. Import folder/repository project FORGE ini.
-4. Di bagian Environment Variables, isi:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-5. Klik `Deploy`.
-6. Setelah deploy selesai, buka domain Vercel yang diberikan.
-
-Lewat terminal:
-
-```bash
-npx vercel login
-npx vercel --prod
+```
+schema.sql
 ```
 
-Saat diminta project name, pakai `forge-arena` atau nama yang kamu mau.
+If upgrading an existing database, run migration files instead of recreating the schema.
 
-## Sound effect
+---
 
-Isi file audio ke path berikut:
+# Deployment
 
-| File | Dipakai untuk |
-|---|---|
-| `public/sounds/button-click.mp3` | Klik tombol |
-| `public/sounds/duel-start.mp3` | Duel mulai |
-| `public/sounds/clock-tick.mp3` | Tick timer saat quiz |
-| `public/sounds/correct.mp3` | Jawaban benar |
-| `public/sounds/wrong.mp3` | Jawaban salah |
-| `public/sounds/win.mp3` | Menang |
-| `public/sounds/lose.mp3` | Kalah |
+Push repository to GitHub.
 
-Kalau file belum ada, app tetap berjalan dengan fallback tone. Di HP, audio baru bisa menyala setelah user melakukan tap pertama karena aturan browser mobile.
+Import project into Vercel.
 
-## Isi pertanyaan baru
+Add Environment Variables.
 
-Pertanyaan masuk ke tabel `questions` di Supabase.
+Deploy.
 
-Contoh SQL:
+---
 
-```sql
-insert into public.questions (
-  id, category, subcategory, question,
-  option_a, option_b, option_c, option_d,
-  correct_option, explanation, difficulty, active
-) values (
-  'q_admin_001',
-  'Integritas',
-  'Kejujuran',
-  'Temanmu menyontek dan mengajakmu ikut. Apa tindakan terbaik?',
-  'Ikut agar diterima',
-  'Menolak dengan sopan dan tetap jujur',
-  'Memberi jawaban sedikit',
-  'Diam lalu ikut',
-  'B',
-  'Integritas berarti melakukan yang benar walau tidak dilihat.',
-  'easy',
-  true
-);
-```
+# Gameplay
 
-## Catatan penting
+1. Register
+2. Login
+3. Challenge another member
+4. Answer five questions
+5. Earn Forge Points
+6. Unlock badges
+7. Maintain Fire Streak
+8. Reach Hall of Legends
 
-- Register tidak memakai email dan tidak memakai OTP.
-- Lupa password diarahkan ke contact person WhatsApp.
-- Avatar selalu logo FORGE, tetapi warna lingkaran avatar bisa diganti lewat pengaturan profil.
-- Fire streak dihitung per hari aktif duel, bukan per jumlah duel.
-- Batas duel adalah 7 duel per hari per akun.
-- Database ada di Supabase, schema-nya ada di `supabase/schema.sql`, dan koneksi backend ada di `api/[...path].js`.
+---
+
+# Roadmap
+
+Upcoming features
+
+* Ranked Seasons
+* Spectator Mode
+* Tournament Bracket
+* Daily Missions
+* Guild / Community
+* AI Generated Questions
+* Admin Dashboard
+* Push Notifications
+* Replay Duel
+* Statistics Dashboard
+* Mobile Application (Android & iOS)
+
+---
+
+# License
+
+Private Project
+
+Copyright © FORGE Community

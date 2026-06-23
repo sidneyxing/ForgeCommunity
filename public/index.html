@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="FORGE adalah Duel Arena Komunitas untuk bertumbuh lewat quiz, leaderboard, badges, dan Forge Points."
+    />
+    <meta name="theme-color" content="#9B111E" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="FORGE" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/image/forge-logo.png" />
+    <link rel="icon" href="/image/forge-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>FORGE Arena</title>
+  </head>
+  <body>
+    <div class="ambient-bg" aria-hidden="true"></div>
+    <div class="boot-loader" id="bootLoader">
+  <div>
+    <img src="/image/forge-logo.png" alt="" />
+    <strong>Memeriksa sesi login...</strong>
+    <small>Mohon tunggu sebentar.</small>
+  </div>
+</div>
+
+    <section id="authView" class="auth-view is-hidden">
+      <div class="auth-brand">
+        <img src="/image/forge-logo.png" alt="FORGE" />
+        <p>Setiap duel membentukmu lebih kuat</p>
+      </div>
+
+      <article class="auth-card" id="authCard">
+        <div class="auth-tabs" aria-label="Auth pages">
+          <button class="is-active" data-auth-tab="login">Masuk</button>
+          <button data-auth-tab="register">Daftar</button>
+          <button data-auth-tab="reset">Bantuan</button>
+        </div>
+
+        <form class="auth-panel is-active" id="loginForm">
+          <p class="eyebrow">Selamat datang kembali.</p>
+          <h1>Masuk Arena</h1>
+          <label>Username
+            <input name="username" autocomplete="username" required placeholder="kairos" />
+          </label>
+          <label>Password
+            <span class="password-field">
+              <input name="password" type="password" autocomplete="current-password" required placeholder="••••••••" />
+              <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
+            </span>
+          </label>
+          <button class="btn primary full" type="submit">Masuk Arena</button>
+          <div class="form-links">
+            <button type="button" data-auth-tab="register">Belum punya akun? Daftar</button>
+            <button type="button" data-auth-tab="reset">Lupa password?</button>
+          </div>
+        </form>
+
+        <form class="auth-panel" id="registerForm">
+          <p class="eyebrow">Daftar -> Langsung Masuk</p>
+          <h1>Buat Akun</h1>
+          <div class="two-fields">
+            <label>Nama<input name="name" required placeholder="Nama lengkap" /></label>
+            <label>Username<input name="username" required minlength="3" placeholder="unique username" /></label>
+          </div>
+          <label>Nomor WhatsApp<input name="phone" inputmode="tel" required placeholder="+62..." /></label>
+          <label>Kota<input name="city" maxlength="60" required placeholder="Contoh: Manado" /></label>
+          <label>Jenis Kelamin
+            <input name="gender" id="registerGenderInput" type="hidden" value="male" />
+            <div class="gender-picker" id="registerGenderPicker" role="group" aria-label="Pilih jenis kelamin saat daftar">
+              <button type="button" class="is-active" data-gender="male">Cowok Warrior</button>
+              <button type="button" data-gender="female">Cewek Warrior</button>
+            </div>
+          </label>
+          <div class="two-fields">
+            <label>Password
+              <span class="password-field">
+                <input name="password" type="password" required minlength="8" />
+                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
+              </span>
+            </label>
+            <label>Konfirmasi
+              <span class="password-field">
+                <input name="confirmPassword" type="password" required minlength="8" />
+                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
+              </span>
+            </label>
+          </div>
+          <button class="btn primary full" type="submit">Buat Akun</button>
+          <small>Nomor WhatsApp dipakai admin untuk bantuan akun dan komunikasi duel.</small>
+        </form>
+
+        <form class="auth-panel" id="resetForm">
+          <p class="eyebrow">Bantuan akun</p>
+          <h1>Lupa Password</h1>
+          <p class="muted">Untuk keamanan komunitas, reset password dilakukan melalui contact person.</p>
+          <a class="btn primary full" href="https://wa.me/6281392187414">Hubungi Contact Person</a>
+          <button class="link-button" type="button" data-auth-tab="login">Kembali ke login</button>
+        </form>
+      </article>
+    </section>
+
+    <div id="appView" class="app-view is-hidden">
+      <aside class="sidebar">
+        <a class="side-logo" data-page="home" href="#home" aria-label="FORGE Home">
+          <img src="/image/forge-logo.png" alt="" />
+          <span>FORGE</span>
+        </a>
+        <nav id="mainNav">
+          <button class="is-active" data-page="home">Home</button>
+          <button data-page="duel">Duel</button>
+          <button data-page="members">Members</button>
+          <button data-page="leaderboard">Leaderboard</button>
+          <button data-page="badges">Badge</button>
+          <button data-page="about">About Us</button>
+          <button data-page="settings">Settings</button>
+        </nav>
+        <div class="daily-flame">
+          <div class="flame-orb" aria-hidden="true"><span></span></div>
+          <div>
+            <span>Daily Flame</span>
+            <strong id="sideFire">0 hari</strong>
+            <small>Dihitung per hari aktif duel</small>
+          </div>
+        </div>
+      </aside>
+
+      <main class="app-shell">
+        <header class="topbar">
+          <button class="icon-btn" id="mobileMenuBtn" aria-label="Open menu">☰</button>
+          <div>
+            <p class="eyebrow" id="pageKicker">Forge Arena</p>
+            <h2 id="pageTitle">Beranda</h2>
+          </div>
+          <button class="profile-pill" id="profilePill" type="button">
+            <span>
+              <strong id="pillUsername">Warrior</strong>
+              <small><span id="pillFp">0</span> lifetime FP</small>
+            </span>
+            <span class="avatar-ring" id="pillAvatarWrap"><img id="pillAvatar" src="/image/profpic.png" alt="" /></span>
+          </button>
+        </header>
+
+        <section class="page is-active" data-view="home">
+          <div class="welcome-grid">
+            <article class="hero-card">
+              <p class="eyebrow">Selamat datang</p>
+              <h1>Halo, <span id="homeName">Warrior</span>!</h1>
+              <p>Berduel setiap hari, kumpulkan Forge Points, jaga api streakmu, dan buktikan dirimu di leaderboard.</p>
+              <div class="hero-quote">Every Duel Forges A Better You</div>
+            </article>
+            <article class="profile-mini card">
+              <span class="avatar-ring avatar-ring-large" id="homeAvatarWrap"><img id="homeAvatar" src="/image/profpic.png" alt="" /></span>
+              <h3 id="homeUsername">Warrior</h3>
+              <p id="homeLevel">Level 1</p>
+              <button class="btn secondary" data-page="settings">Pengaturan Profil</button>
+            </article>
+          </div>
+
+          <div class="stat-grid" id="dashboardStats"></div>
+
+          <div class="action-grid">
+            <button class="action-card" data-page="duel"><span>⚔</span><strong>Cari Duel</strong><small>Temukan lawan acak</small></button>
+            <button class="action-card" data-page="members"><span>✦</span><strong>Ajak Teman</strong><small>Undang dari Member Arena</small></button>
+            <button class="action-card" data-page="badges"><span>◈</span><strong>Koleksi Badge</strong><small id="badgePreviewText">0 terbuka</small></button>
+            <button class="action-card" data-page="leaderboard"><span>♛</span><strong>Top 3 Minggu Ini</strong><small id="topPreviewText">Loading...</small></button>
+          </div>
+        </section>
+
+        <section class="page" data-view="duel">
+          <article class="duel-panel" id="duelPanel">
+            <div class="duel-top">
+              <div class="fighter">
+                <span class="avatar-ring" id="duelUserAvatarWrap"><img id="duelUserAvatar" src="/image/profpic.png" alt="" /></span>
+                <div class="fighter-meta">
+                  <strong id="duelUserName">You</strong>
+                  <span id="duelUserScore">0 benar · Soal 0/5</span>
+                  <div class="duel-score-bars" id="duelUserBars"></div>
+                </div>
+              </div>
+              <div class="duel-centerpiece">
+                <img class="duel-top-logo" id="duelTopLogo" src="/image/logoduel.png" alt="FORGE Duel" />
+                <div class="timer-ring is-hidden"><span id="timerValue">10</span><small>detik</small></div>
+              </div>
+              <div class="fighter right">
+                <span class="avatar-ring" id="duelOpponentAvatarWrap"><img id="duelOpponentAvatar" src="/image/profpic.png" alt="" /></span>
+                <div class="fighter-meta">
+                  <strong id="duelOpponentName">Opponent</strong>
+                  <span id="duelOpponentScore">0 benar · Soal 0/5</span>
+                  <div class="duel-score-bars" id="duelOpponentBars"></div>
+                </div>
+              </div>
+            </div>
+            <div id="duelIdle" class="duel-idle">
+              <h1>ARE YOU READY?</h1>
+              <p id="duelLimitText">Maksimal 7 duel per hari. Setiap duel berisi 5 pertanyaan, masing-masing 10 detik.</p>
+              <button class="btn primary" id="startDuelBtn">Mulai Duel</button>
+            </div>
+            <div id="duelActive" class="duel-active is-hidden">
+              <div class="duel-meta">
+                <span id="questionCounter">Soal 1/5</span>
+                <span id="questionCategory">Kategori</span>
+              </div>
+              <h2 id="questionText"></h2>
+              <div class="answers-grid" id="answersGrid"></div>
+            </div>
+            <div id="duelResult" class="duel-result is-hidden"></div>
+          </article>
+        </section>
+
+        <section class="page" data-view="members">
+          <div class="section-tools">
+            <input id="memberSearch" placeholder="Cari username / ID" />
+            <div class="member-filter" id="memberTab" role="tablist" aria-label="Filter member">
+              <button class="is-active" type="button" data-member-tab="all">Semua Member</button>
+              <button type="button" data-member-tab="online">Online</button>
+              <button type="button" data-member-tab="friends">Teman</button>
+              <button type="button" data-member-tab="favourites">Favorit</button>
+            </div>
+          </div>
+          <div class="table-card">
+            <div class="request-panel" id="requestPanel"></div>
+            <div class="member-profile-panel" id="memberProfilePanel">
+              <p class="muted">Klik member untuk melihat profile dan stats.</p>
+            </div>
+            <div class="member-list" id="memberList"></div>
+          </div>
+        </section>
+
+        <section class="page" data-view="leaderboard">
+          <div class="leader-grid">
+            <article class="table-card">
+              <div class="table-head"><span>Rank</span><span>Pemain</span><span>Level</span><span>FP Mingguan</span><span>Menang</span><span>Rata-rata</span></div>
+              <div id="leaderboardRows"></div>
+            </article>
+            <aside class="legend-card">
+              <h3>Hall of Legends</h3>
+              <div id="hallOfLegends"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" data-view="badges">
+          <div class="badge-layout">
+            <article>
+              <div class="page-headline">
+                <h1>Badge</h1>
+                <p id="badgeProgress">0/100 terbuka</p>
+              </div>
+              <div class="badge-grid" id="badgeGrid"></div>
+            </article>
+            <aside class="badge-detail" id="badgeDetail">
+              <h3>Pilih badge</h3>
+              <p>Klik badge untuk melihat detail dan syarat unlock.</p>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" data-view="about">
+          <article class="about-hero">
+            <div>
+              <p class="eyebrow">Foundation Of Resilience, Growth & Excellence</p>
+              <h1>Selamat Datang di FORGE Arena</h1>
+              <p>FORGE adalah web app duel quiz komunitas untuk membangkitkan interaksi, membangun karakter, dan membuat pertumbuhan terasa seru.</p>
+            </div>
+            <img src="/image/forge-logo.png" alt="" />
+          </article>
+          <div class="about-grid" id="aboutGrid"></div>
+        </section>
+
+        <section class="page" data-view="settings">
+          <div class="settings-grid">
+            <form class="settings-card" id="profileForm">
+              <h3>Pengaturan Profil</h3>
+              <label>Nama<input name="name" id="nameInput" required /></label>
+              <label>Username<input name="username" id="usernameInput" required /></label>
+              <label>Nomor WhatsApp<input name="phone" id="phoneInput" inputmode="tel" required /></label>
+              <label>Kota<input name="city" id="cityInput" maxlength="60" placeholder="Contoh: Manado" /></label>
+              <label>Jenis Kelamin
+                <input name="gender" id="genderInput" type="hidden" />
+                <div class="gender-picker" id="genderPicker" role="group" aria-label="Pilih jenis kelamin">
+                  <button type="button" data-gender="male">Laki-laki</button>
+                  <button type="button" data-gender="female">Perempuan</button>
+                </div>
+              </label>
+              <button class="btn primary" type="submit">Simpan Profil</button>
+            </form>
+            <form class="settings-card" id="settingsForm">
+              <h3>Pengaturan Akun</h3>
+              <label class="switch"><span><strong>Music</strong><small>Instrument piano latar web</small></span><input name="music_enabled" type="checkbox" /></label>
+              <label class="switch"><span><strong>Sound FX</strong><small>Klik, timer, benar, salah, menang, kalah</small></span><input name="sfx_enabled" type="checkbox" /></label>
+              <label class="switch"><span><strong>Status Online</strong><small>Tampilkan status aktif di member arena</small></span><input name="show_online_status" type="checkbox" /></label>
+              <label class="switch"><span><strong>Undangan Duel</strong><small>Izinkan member lain mengirim request duel</small></span><input name="allow_duel_invites" type="checkbox" /></label>
+              <button class="btn primary" type="submit">Simpan Pengaturan</button>
+              <button class="btn danger" type="button" id="logoutBtn">Logout</button>
+              <button class="link-button danger-text" type="button" id="deleteAccountBtn">Hapus akun</button>
+            </form>
+            <article class="settings-card duel-history-card">
+              <h3>Riwayat Duel</h3>
+              <div id="duelHistoryList"></div>
+            </article>
+            <article class="settings-card profile-stats" id="profileStats"></article>
+          </div>
+        </section>
+
+        <footer class="footer">
+          <div>
+            <img src="/image/forge-logo.png" alt="" />
+            <strong>FORGE</strong>
+            <small>Duel. Grow. Rise.</small>
+          </div>
+          <div><strong>Contact Person</strong><a href="https://wa.me/6281392187414">081392187414</a><a href="mailto:forgecommunity.id@gmail.com">forgecommunity.id@gmail.com</a></div>
+          <div><strong>Follow Us</strong><a href="https://instagram.com/forge.arena">Instagram</a><a href="https://facebook.com/forge.arena">Facebook</a><a href="https://tiktok.com/@forge.arena">TikTok</a></div>
+          <p>© 2026 FORGE. All rights reserved.</p>
+        </footer>
+      </main>
+
+      <nav class="bottom-nav" id="bottomNav">
+        <button class="is-active" data-page="home">Beranda</button>
+        <button data-page="duel">Duel</button>
+        <button data-page="members">Member</button>
+        <button data-page="leaderboard">Rank</button>
+        <button data-page="settings">Atur</button>
+      </nav>
+    </div>
+
+    <div id="toast" class="toast"></div>
+    <canvas id="confettiCanvas" class="confetti-canvas" aria-hidden="true"></canvas>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

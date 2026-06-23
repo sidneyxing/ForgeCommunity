@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env.local
+.env
+dist/
+*.log
+*.zip
+
+.vercel

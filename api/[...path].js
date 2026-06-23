@@ -21,9 +21,8 @@ export default async function handler(req, res) {
     await ensureSeedOnce(db);
     await ensureWeeklySeason(db);
 
-    const pathParts = Array.isArray(req.query.path) ? req.query.path : req.query.path ? [req.query.path] : [];
-    const path = `/${pathParts.join("/")}`;
     const method = req.method.toUpperCase();
+    const path = resolveApiPath(req);
 
     if (method === "POST" && path === "/auth/register") return register(req, res, db);
     if (method === "POST" && path === "/auth/login") return login(req, res, db);
@@ -49,8 +48,27 @@ export default async function handler(req, res) {
 
     return send(res, 404, { error: "API route not found." });
   } catch (error) {
+    console.error("API ERROR:", error);
     return send(res, error.status || 500, { error: error.message || "Server error" });
   }
+}
+
+function resolveApiPath(req) {
+  const urlPath = new URL(req.url || "/", "http://localhost").pathname;
+  const cleanUrlPath = urlPath.replace(/^\/api/, "") || "/";
+
+  if (cleanUrlPath && cleanUrlPath !== "/" && cleanUrlPath !== "/[...path].js") {
+    return cleanUrlPath;
+  }
+
+  const rawPath = req.query?.path;
+  const pathParts = Array.isArray(rawPath)
+    ? rawPath
+    : rawPath
+      ? [rawPath]
+      : [];
+
+  return `/${pathParts.join("/")}`;
 }
 
 function getSupabase() {

@@ -36,6 +36,9 @@ const state = {
   currentIncomingRequests: [],
   currentOutgoingRequests: [],
   duelStatusTimer: null,
+  matchmakingTimer: null,
+  duelStartTimer: null,
+  isMatchmaking: false,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
 };
@@ -390,12 +393,11 @@ function distributeScore(score, total = 5) {
 function resetDuelProgress(duel) {
   state.duelIndex = 0;
   state.duelUserAnswers = Array(duel.questions.length).fill(null);
-  state.duelOpponentAnswers = duel.mode === "realtime"
-    ? Array(duel.questions.length).fill(null)
-    : distributeScore(duel.opponent_score, duel.questions.length);
+  state.duelOpponentAnswers = Array(duel.questions.length).fill(null);
   state.duelOpponentAnsweredCount = 0;
   state.duelAnswerSaves = [];
   state.answerLocked = false;
+  state.isMatchmaking = false;
   renderDuelProgress();
 }
 
@@ -403,7 +405,7 @@ function renderDuelProgress() {
   const total = state.duel?.questions?.length || 5;
   const activeIndex = Math.min(state.duelIndex, total - 1);
   const userDone = state.duelUserAnswers.filter((value) => value !== null).length;
-  const opponentDone = state.duel?.mode === "realtime" ? Math.min(state.duelOpponentAnsweredCount, total) : Math.min(userDone, total);
+  const opponentDone = Math.min(state.duelOpponentAnsweredCount, total);
   const userCorrect = state.duelUserAnswers.filter((value) => value === true).length;
   const opponentVisible = state.duelOpponentAnswers.slice(0, opponentDone);
   const opponentCorrect = opponentVisible.filter((value) => value === true).length;
@@ -425,6 +427,16 @@ function clearResultCountdown() {
   state.resultCountdownTimer = null;
 }
 
+function clearMatchmakingWatcher() {
+  clearInterval(state.matchmakingTimer);
+  state.matchmakingTimer = null;
+}
+
+function clearDuelStartTimer() {
+  clearInterval(state.duelStartTimer);
+  state.duelStartTimer = null;
+}
+
 function setDuelTopMode(mode) {
   const active = mode === "active";
   $("#duelTopLogo").classList.toggle("is-hidden", active || mode === "result");
@@ -434,6 +446,8 @@ function setDuelTopMode(mode) {
 
 function resetDuelToIdle() {
   clearResultCountdown();
+  clearMatchmakingWatcher();
+  clearDuelStartTimer();
   clearInterval(state.duelTimer);
   clearInterval(state.duelStatusTimer);
   state.duelStatusTimer = null;
@@ -675,7 +689,7 @@ function renderMemberList(members) {
       <div class="mini-actions">
         <button class="${member.is_friend ? "is-on" : ""}" data-relation="friend" data-id="${member.id}">Friend</button>
         <button class="${member.is_favourite ? "is-on" : ""}" data-relation="favourite" data-id="${member.id}">Fav</button>
-        <button data-invite="${member.id}">Invite Duel</button>
+        <button data-invite="${member.id}" ${member.online ? "" : "disabled"}>${member.online ? "Invite Duel" : "Offline"}</button>
       </div>
     </article>
   `).join("") || `<p class="muted">Belum ada member lain. Daftarkan minimal 2 akun agar Member Arena terisi.</p>`;
@@ -808,6 +822,9 @@ async function respondDuelRequest(button) {
 
 function beginDuel(duel) {
   clearResultCountdown();
+  clearMatchmakingWatcher();
+  clearDuelStartTimer();
+  state.isMatchmaking = false;
   state.duel = duel;
   resetDuelProgress(state.duel);
   showPage("duel");
@@ -826,8 +843,42 @@ function beginDuel(duel) {
   $("#duelPanel").classList.remove("loss-shake", "win-glow");
   subscribeDuelChannel(duel.id);
   startDuelStatusWatcher();
-  playSound("duelStart");
-  renderQuestion();
+  startSyncedDuelCountdown();
+}
+
+function startSyncedDuelCountdown() {
+  const startsAtMs = new Date(state.duel?.starts_at || Date.now()).getTime();
+  const delayMs = startsAtMs - Date.now();
+  if (delayMs <= 250) {
+    $("#duelResult").classList.add("is-hidden");
+    $("#duelActive").classList.remove("is-hidden");
+    setDuelTopMode("active");
+    playSound("duelStart");
+    renderQuestion();
+    return;
+  }
+
+  $("#duelActive").classList.add("is-hidden");
+  $("#duelResult").classList.remove("is-hidden");
+  setDuelTopMode("result");
+  const renderCountdown = () => {
+    const left = Math.max(1, Math.ceil((startsAtMs - Date.now()) / 1000));
+    $("#duelResult").innerHTML = `
+      <p class="eyebrow">Lawan ditemukan</p>
+      <h1>Mulai dalam ${left}</h1>
+      <p class="result-copy">Kamu dan lawan sudah masuk ruang duel. Soal akan muncul bersamaan.</p>
+    `;
+    if (Date.now() >= startsAtMs) {
+      clearDuelStartTimer();
+      $("#duelResult").classList.add("is-hidden");
+      $("#duelActive").classList.remove("is-hidden");
+      setDuelTopMode("active");
+      playSound("duelStart");
+      renderQuestion();
+    }
+  };
+  renderCountdown();
+  state.duelStartTimer = window.setInterval(renderCountdown, 250);
 }
 
 function subscribeDuelChannel(duelId) {
@@ -1036,14 +1087,74 @@ function renderDuelHistory() {
 }
 
 async function startDuel() {
+  if (state.isMatchmaking) return;
   clearResultCountdown();
+  clearMatchmakingWatcher();
   const dailyLimit = getDailyDuelLimit();
   if ((state.dashboard?.duelsToday || 0) >= dailyLimit) {
     toast(`Maaf, Anda sudah mencapai limit duel harian ${dailyLimit}/${dailyLimit}.`);
     return;
   }
-  const data = await api("/api/duel/start", { method: "POST" });
-  beginDuel(data.duel);
+  state.isMatchmaking = true;
+  let data;
+  try {
+    data = await api("/api/duel/start", { method: "POST" });
+  } catch (err) {
+    state.isMatchmaking = false;
+    throw err;
+  }
+  if (data.duel) {
+    state.isMatchmaking = false;
+    beginDuel(data.duel);
+    return;
+  }
+  showMatchmakingRoom(data.message);
+  startMatchmakingWatcher();
+}
+
+function showMatchmakingRoom(message = "Menunggu lawan online. Jangan tutup halaman ini.") {
+  $("#duelIdle").classList.add("is-hidden");
+  $("#duelActive").classList.add("is-hidden");
+  $("#duelResult").classList.remove("is-hidden");
+  setDuelTopMode("result");
+  $("#duelResult").innerHTML = `
+    <p class="eyebrow">Ruang Tunggu</p>
+    <h1>Mencari Lawan...</h1>
+    <p class="result-copy">${escapeHtml(message)}</p>
+    <div class="duel-result-actions">
+      <button class="btn secondary" id="cancelMatchmakingBtn">Batalkan</button>
+    </div>
+  `;
+}
+
+function startMatchmakingWatcher() {
+  clearMatchmakingWatcher();
+  state.matchmakingTimer = window.setInterval(async () => {
+    const data = await api("/api/duel/matchmaking/status").catch((err) => {
+      toast(err.message);
+      return null;
+    });
+    if (!data) return;
+    if (data.duel) {
+      state.isMatchmaking = false;
+      beginDuel(data.duel);
+      return;
+    }
+    if (data.cancelled) {
+      state.isMatchmaking = false;
+      clearMatchmakingWatcher();
+      resetDuelToIdle();
+      toast("Pencarian lawan dibatalkan atau sudah timeout.");
+    }
+  }, 1000);
+}
+
+async function cancelMatchmaking() {
+  state.isMatchmaking = false;
+  clearMatchmakingWatcher();
+  await api("/api/duel/matchmaking/cancel", { method: "POST" }).catch(() => {});
+  resetDuelToIdle();
+  toast("Pencarian lawan dibatalkan.");
 }
 
 function renderQuestion() {
@@ -1290,6 +1401,7 @@ function bindEvents() {
     if (button) answerQuestion(button.dataset.option).catch((err) => toast(err.message));
   });
   $("#duelResult").addEventListener("click", (event) => {
+    if (event.target.closest("#cancelMatchmakingBtn")) cancelMatchmaking().catch((err) => toast(err.message));
     if (event.target.closest("#rematchCountdownBtn")) resetDuelToIdle();
     if (event.target.closest("#backHomeBtn")) {
       resetDuelToIdle();
@@ -1379,6 +1491,8 @@ function bindEvents() {
     clearInterval(state.requestPollTimer);
     clearInterval(state.requestCountdownTimer);
     clearInterval(state.duelStatusTimer);
+    clearMatchmakingWatcher();
+    clearDuelStartTimer();
     if (state.realtimeClient) {
       if (state.userChannel) state.realtimeClient.removeChannel(state.userChannel);
       if (state.duelChannel) state.realtimeClient.removeChannel(state.duelChannel);

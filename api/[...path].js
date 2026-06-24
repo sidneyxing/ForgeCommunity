@@ -11,6 +11,9 @@ const QUESTION_ROLLING_WINDOW_DAYS = 60;
 const QUESTION_POOL_RETENTION_DAYS = 70;
 const QUESTION_TIME_LIMIT_MS = 10 * 1000;
 const DUEL_REQUEST_WAIT_MS = 10 * 1000;
+const ONLINE_CUTOFF_MS = 2 * 60 * 1000;
+const MATCH_QUEUE_STALE_MS = 15 * 1000;
+const DUEL_SETTLE_GRACE_MS = 15 * 1000;
 const APP_TIME_ZONE = "Asia/Makassar";
 let seedPromise;
 let weeklySeasonCheckedKey;
@@ -41,6 +44,8 @@ export default async function handler(req, res) {
     if (method === "GET" && path === "/leaderboard") return leaderboard(res, db);
     if (method === "GET" && path === "/badges") return badges(res, db, user);
     if (method === "POST" && path === "/duel/start") return startDuel(res, db, user);
+    if (method === "GET" && path === "/duel/matchmaking/status") return matchmakingStatus(res, db, user);
+    if (method === "POST" && path === "/duel/matchmaking/cancel") return cancelMatchmaking(res, db, user);
     if (method === "GET" && /^\/duel\/[^/]+$/.test(path)) return getDuel(res, db, user, path.split("/")[2]);
     if (method === "GET" && /^\/duel\/[^/]+\/status$/.test(path)) return duelStatus(res, db, user, path.split("/")[2]);
     if (method === "POST" && path === "/duel/answer") return answerDuel(req, res, db, user);
@@ -245,6 +250,15 @@ function scoreForSide(duel, side) {
   return side === "opponent"
     ? { mine: Number(duel.opponent_score || 0), theirs: Number(duel.user_score || 0) }
     : { mine: Number(duel.user_score || 0), theirs: Number(duel.opponent_score || 0) };
+}
+
+function isRecentlyOnline(user) {
+  return Boolean(user?.last_seen_at && Date.now() - new Date(user.last_seen_at).getTime() <= ONLINE_CUTOFF_MS);
+}
+
+function duelAnswerDeadlineMs(duel) {
+  const startsAt = duel.starts_at || duel.started_at;
+  return new Date(startsAt).getTime() + (DUEL_QUESTION_COUNT * QUESTION_TIME_LIMIT_MS) + DUEL_SETTLE_GRACE_MS;
 }
 
 async function duelsTodayCount(db, userId) {
@@ -581,7 +595,7 @@ async function members(req, res, db, user) {
     query = query.in("id", ids);
   }
   const rows = unwrap(await query.order("weekly_fp", { ascending: false }).order("username", { ascending: true }).limit(80));
-  const onlineCutoff = Date.now() - 5 * 60 * 1000;
+  const onlineCutoff = Date.now() - ONLINE_CUTOFF_MS;
   const members = rows.map((member) => {
     const rel = relByTarget.get(member.id) || {};
     const online = member.last_seen_at && new Date(member.last_seen_at).getTime() > onlineCutoff;
@@ -607,8 +621,17 @@ async function relation(req, res, db, user, targetId) {
 async function inviteDuelRequest(res, db, user, targetId) {
   if (targetId === user.id) return send(res, 400, { error: "Tidak bisa invite diri sendiri." });
   await cleanupExpiredDuelRequests(db);
-  const member = unwrap(await db.from("users").select("id").eq("id", targetId).maybeSingle());
-  if (!member) return send(res, 404, { error: "Member tidak ditemukan." });
+  const [myCount, member] = await Promise.all([
+    duelsTodayCount(db, user.id),
+    db.from("users").select("id, last_seen_at").eq("id", targetId).maybeSingle(),
+  ]);
+  if (myCount >= DAILY_DUEL_LIMIT) return send(res, 429, { error: `Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.` });
+  if (member.error) throw member.error;
+  const target = member.data;
+  if (!target) return send(res, 404, { error: "Member tidak ditemukan." });
+  if (!isRecentlyOnline(target)) return send(res, 400, { error: "Member sedang offline, tidak bisa di-invite duel." });
+  const opponentTodayCount = await duelsTodayCount(db, targetId);
+  if (opponentTodayCount >= DAILY_DUEL_LIMIT) return send(res, 429, { error: `Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT}/${DAILY_DUEL_LIMIT} hari ini.` });
   const settings = await settingsFor(db, targetId);
   if (!settings.allow_duel_invites) return send(res, 400, { error: "Member ini menutup undangan duel." });
   const expiresAt = new Date(Date.now() + DUEL_REQUEST_WAIT_MS).toISOString();
@@ -751,7 +774,81 @@ async function badges(res, db, user) {
 }
 
 async function startDuel(res, db, user) {
-  return send(res, 200, { duel: await createDuel(db, user) });
+  return send(res, 200, await joinMatchmaking(db, user));
+}
+
+async function joinMatchmaking(db, user) {
+  const questions = await dailyDuelQuestions(db);
+  if (questions.length < DUEL_QUESTION_COUNT) {
+    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
+  }
+
+  const rpcResult = await db.rpc("match_duel_queue", {
+    p_user_id: user.id,
+    p_question_ids: questions.map((question) => question.id),
+    p_day_start: startOfTodayIso(),
+    p_daily_limit: DAILY_DUEL_LIMIT,
+  });
+  if (rpcResult.error) {
+    const message = String(rpcResult.error.message || "");
+    if (message.includes("LIMIT_REACHED")) {
+      throw Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
+    }
+    if (message.includes("QUESTION_POOL_NOT_READY")) {
+      throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
+    }
+    throw rpcResult.error;
+  }
+  const result = rpcResult.data;
+  const match = Array.isArray(result) ? result[0] : result;
+
+  if (!match?.matched || !match.duel_id) {
+    return {
+      waiting: true,
+      message: "Menunggu lawan online. Jangan tutup halaman ini.",
+      queue: { staleInMs: MATCH_QUEUE_STALE_MS },
+    };
+  }
+
+  const duel = unwrap(await db.from("duels").select("*").eq("id", match.duel_id).single());
+  return { duel: await duelPayload(db, duel, user.id) };
+}
+
+async function matchmakingStatus(res, db, user) {
+  const queue = unwrap(await db
+    .from("duel_queue")
+    .select("status, duel_id, joined_at, last_seen_at, updated_at")
+    .eq("user_id", user.id)
+    .maybeSingle());
+  if (!queue || queue.status === "cancelled") {
+    return send(res, 200, { waiting: false, cancelled: true });
+  }
+
+  if (queue.status === "matched" && queue.duel_id) {
+    const duel = unwrap(await db.from("duels").select("*").eq("id", queue.duel_id).maybeSingle());
+    if (duel && isDuelParticipant(duel, user.id)) {
+      return send(res, 200, { waiting: false, duel: await duelPayload(db, duel, user.id) });
+    }
+  }
+
+  if (new Date(queue.last_seen_at).getTime() < Date.now() - MATCH_QUEUE_STALE_MS) {
+    unwrap(await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id));
+    return send(res, 200, { waiting: false, cancelled: true });
+  }
+
+  unwrap(await db.from("duel_queue").update({
+    last_seen_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("user_id", user.id).eq("status", "waiting"));
+  return send(res, 200, { waiting: true });
+}
+
+async function cancelMatchmaking(res, db, user) {
+  unwrap(await db.from("duel_queue").update({
+    status: "cancelled",
+    updated_at: new Date().toISOString(),
+  }).eq("user_id", user.id).eq("status", "waiting"));
+  return send(res, 200, { ok: true });
 }
 
 async function getDuel(res, db, user, duelId) {
@@ -863,10 +960,11 @@ function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
   const score = scoreForSide(duel, side);
   return {
     id: duel.id,
-    mode: duel.opponent_id ? "realtime" : "bot",
+    mode: duel.opponent_id ? "realtime" : "unmatched",
     side,
     opponent_id: opponent?.id || (side === "user" ? duel.opponent_id : duel.user_id),
     status: duel.status,
+    starts_at: duel.starts_at || duel.started_at,
     result: resultForSide(duel.result, side),
     opponent_name: opponent?.username || duel.opponent_name || "Forge Rival",
     opponent_gender: opponent?.gender || "male",
@@ -897,13 +995,14 @@ async function duelStatusPayload(db, duel, viewerId) {
 }
 
 async function createDuel(db, user, opponentId = null) {
+  if (!opponentId) {
+    throw Object.assign(new Error("Menunggu lawan online. Duel tidak dibuat dengan bot/template offline."), { status: 400 });
+  }
   const todayCount = await duelsTodayCount(db, user.id);
   if (todayCount >= DAILY_DUEL_LIMIT) throw Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
-  if (opponentId) {
-    const opponentTodayCount = await duelsTodayCount(db, opponentId);
-    if (opponentTodayCount >= DAILY_DUEL_LIMIT) {
-      throw Object.assign(new Error(`Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT} duel hari ini.`), { status: 429 });
-    }
+  const opponentTodayCount = await duelsTodayCount(db, opponentId);
+  if (opponentTodayCount >= DAILY_DUEL_LIMIT) {
+    throw Object.assign(new Error(`Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT} duel hari ini.`), { status: 429 });
   }
 
   const questions = await dailyDuelQuestions(db);
@@ -911,18 +1010,16 @@ async function createDuel(db, user, opponentId = null) {
     throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
   }
 
-  const opponent = opponentId
-    ? unwrap(await db.from("users").select("id, username, gender, profile_color").eq("id", opponentId).neq("id", user.id).maybeSingle())
-    : shuffle(unwrap(await db.from("users").select("id, username, gender, profile_color").neq("id", user.id))).at(0);
+  const opponent = unwrap(await db.from("users").select("id, username, gender, profile_color, last_seen_at").eq("id", opponentId).neq("id", user.id).maybeSingle());
+  if (!opponent) throw Object.assign(new Error("Lawan tidak ditemukan."), { status: 404 });
+  if (!isRecentlyOnline(opponent)) throw Object.assign(new Error("Lawan sedang offline, duel dibatalkan."), { status: 400 });
   const duelId = id("duel");
-  const opponentScore = opponentId ? 0 : 2 + Math.floor(Math.random() * 4);
   unwrap(await db.from("duels").insert({
     id: duelId,
     user_id: user.id,
-    opponent_id: opponent?.id || null,
-    opponent_name: opponent?.username || "Forge Rival",
-    opponent_score: opponentScore,
-    opponent_avg_time_ms: 4200 + Math.floor(Math.random() * 3800),
+    opponent_id: opponent.id,
+    opponent_name: opponent.username,
+    starts_at: new Date(Date.now() + 3000).toISOString(),
   }));
   unwrap(await db.from("duel_questions").insert(questions.map((question, index) => ({ duel_id: duelId, question_id: question.id, position: index + 1 }))));
   const duel = unwrap(await db.from("duels").select("*").eq("id", duelId).single());
@@ -964,7 +1061,9 @@ async function finishDuel(req, res, db, user) {
     const userAnswers = allAnswers.filter((answer) => answer.user_id === duel.user_id);
     const opponentAnswers = allAnswers.filter((answer) => answer.user_id === duel.opponent_id);
     if (userAnswers.length < DUEL_QUESTION_COUNT || opponentAnswers.length < DUEL_QUESTION_COUNT) {
-      return send(res, 200, { waiting: true, status: await duelStatusPayload(db, duel, user.id) });
+      if (Date.now() < duelAnswerDeadlineMs(duel)) {
+        return send(res, 200, { waiting: true, status: await duelStatusPayload(db, duel, user.id) });
+      }
     }
   }
   await settleDuel(db, duel);

@@ -1,3 +1,14 @@
+-- ============================================================
+-- FORGE Combined SQL
+-- Combined from 4 SQL files uploaded in this conversation.
+-- Note: These queries are preserved for archive/re-run reference.
+-- ============================================================
+
+
+-- ============================================================
+-- Source: schema(4).sql
+-- ============================================================
+
 create table if not exists public.users (
   id text primary key,
   given_id text not null unique,
@@ -235,3 +246,122 @@ alter table public.badges enable row level security;
 alter table public.user_badges enable row level security;
 alter table public.weekly_rank_snapshots enable row level security;
 alter table public.duel_requests enable row level security;
+
+
+-- ============================================================
+-- Source: realtime-duel-migration(2).sql
+-- ============================================================
+
+alter table public.questions add column if not exists question_type text not null default 'text';
+alter table public.questions add column if not exists image_url text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'questions_question_type_format'
+      and conrelid = 'public.questions'::regclass
+  ) then
+    alter table public.questions
+      add constraint questions_question_type_format check (question_type in ('text', 'image'));
+  end if;
+end $$;
+
+alter table public.duels add column if not exists opponent_fp_awarded integer not null default 0;
+alter table public.duels add column if not exists settled_at timestamptz;
+
+alter table public.duel_requests
+  add column if not exists expires_at timestamptz not null default (now() + interval '10 seconds');
+
+alter table public.duel_requests
+  add column if not exists duel_id text references public.duels(id) on delete set null;
+
+create index if not exists idx_duel_requests_expiry
+  on public.duel_requests (status, expires_at);
+
+create index if not exists idx_duels_opponent_started
+  on public.duels (opponent_id, started_at desc);
+
+update public.duel_requests
+set expires_at = coalesce(expires_at, created_at + interval '10 seconds')
+where expires_at is null;
+
+
+-- ============================================================
+-- Source: random-matchmaking-migration.sql
+-- ============================================================
+
+-- FORGE random matchmaking queue
+-- Run this once in Supabase SQL Editor before deploying the updated files.
+
+create table if not exists public.duel_match_queue (
+  id text primary key,
+  user_id text not null references public.users(id) on delete cascade,
+  status text not null default 'waiting' check (status in ('waiting', 'matched', 'expired', 'cancelled')),
+  duel_id text references public.duels(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  matched_at timestamptz
+);
+
+create unique index if not exists idx_duel_match_queue_one_waiting
+  on public.duel_match_queue (user_id)
+  where status = 'waiting';
+
+create index if not exists idx_duel_match_queue_waiting
+  on public.duel_match_queue (status, expires_at, created_at);
+
+create index if not exists idx_duel_match_queue_duel
+  on public.duel_match_queue (duel_id);
+
+-- Clean old bot-style active duels that do not have a real opponent.
+update public.duels
+set status = 'cancelled', finished_at = coalesce(finished_at, now())
+where opponent_id is null
+  and status = 'active';
+
+
+-- ============================================================
+-- Source: weekly-ui-fix-migration(2).sql
+-- ============================================================
+
+create table if not exists public.system_settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.daily_question_pool (
+  pool_date date not null,
+  question_id text not null references public.questions(id) on delete cascade,
+  position integer not null,
+  created_at timestamptz not null default now(),
+  primary key (pool_date, question_id),
+  constraint daily_question_pool_position_positive check (position > 0)
+);
+
+create index if not exists idx_daily_question_pool_date_position
+  on public.daily_question_pool (pool_date, position);
+
+alter table public.users add column if not exists city text not null default '';
+alter table public.users add column if not exists gender text not null default '';
+alter table public.user_settings add column if not exists music_enabled boolean not null default true;
+alter table public.user_settings add column if not exists sfx_enabled boolean not null default true;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'users_gender_format'
+      and conrelid = 'public.users'::regclass
+  ) then
+    alter table public.users add constraint users_gender_format check (gender in ('', 'male', 'female'));
+  end if;
+end $$;
+
+alter table public.system_settings enable row level security;
+alter table public.daily_question_pool enable row level security;
+

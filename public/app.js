@@ -41,6 +41,9 @@ const state = {
   isMatchmaking: false,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
+  memberRandomRanks: new Map(),
+  renderedResultDuelId: null,
+  resultSoundPlayedDuelIds: new Set(),
 };
 
 const pages = {
@@ -152,7 +155,7 @@ function activateAudio() {
   setMusicMode(state.musicMode);
 }
 
-function playSound(name) {
+function playSound(name, options = {}) {
   if (state.me && state.me.settings?.sfx_enabled === false) return;
   activateAudio();
   if (state.audioContext?.state === "suspended") {
@@ -160,8 +163,10 @@ function playSound(name) {
   }
   const audio = state.sounds[name];
   if (audio) {
-    audio.currentTime = 0;
-    audio.play().catch(() => tone(name));
+    const player = options.overlap ? audio.cloneNode(true) : audio;
+    player.currentTime = 0;
+    player.volume = audio.volume;
+    player.play().catch(() => tone(name));
   } else {
     tone(name);
   }
@@ -397,6 +402,7 @@ function resetDuelProgress(duel) {
   state.duelOpponentAnsweredCount = 0;
   state.duelAnswerSaves = [];
   state.answerLocked = false;
+  state.renderedResultDuelId = null;
   state.isMatchmaking = false;
   renderDuelProgress();
 }
@@ -601,7 +607,7 @@ async function loadDuelRequests({ notify = false } = {}) {
     for (const request of requests) {
       if (!state.seenRequestIds.has(request.id)) {
         state.seenRequestIds.add(request.id);
-        toast(`${request.requester_username} mengajak kamu duel. Accept dalam 10 detik.`);
+        toast(`${request.requester_username} mengajak kamu duel. Accept dalam 20 detik.`);
       }
     }
     for (const request of outgoing) {
@@ -665,10 +671,26 @@ async function loadMembers() {
 }
 
 function filterMembersForTab(members, tab) {
-  if (tab === "online") return members.filter((member) => member.online);
-  if (tab === "friends") return members.filter((member) => member.is_friend);
-  if (tab === "favourites") return members.filter((member) => member.is_favourite);
-  return members;
+  let filtered = members;
+  if (tab === "online") filtered = members.filter((member) => member.online);
+  if (tab === "friends") filtered = members.filter((member) => member.is_friend);
+  if (tab === "favourites") filtered = members.filter((member) => member.is_favourite);
+  return sortMembersForDisplay(filtered);
+}
+
+function memberRandomRank(memberId) {
+  if (!state.memberRandomRanks.has(memberId)) state.memberRandomRanks.set(memberId, Math.random());
+  return state.memberRandomRanks.get(memberId);
+}
+
+function sortMembersForDisplay(members) {
+  return [...members].sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    if (a.online && b.online) {
+      return new Date(b.last_seen_at || 0).getTime() - new Date(a.last_seen_at || 0).getTime();
+    }
+    return memberRandomRank(a.id) - memberRandomRank(b.id);
+  });
 }
 
 function renderCachedMembersForActiveTab() {
@@ -801,7 +823,7 @@ async function inviteDuel(memberId) {
     payload: { from: state.me.id },
   }).catch(() => {});
   await loadDuelRequests({ notify: false }).catch(() => {});
-  toast("Undangan duel terkirim. Menunggu accept 10 detik.");
+  toast("Undangan duel terkirim. Menunggu accept 20 detik.");
 }
 
 async function respondDuelRequest(button) {
@@ -1225,6 +1247,7 @@ async function answerQuestion(option) {
 }
 
 async function finishDuel({ fromSync = false } = {}) {
+  if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
   await Promise.all(state.duelAnswerSaves);
   const data = await api("/api/duel/finish", { method: "POST", body: { duelId: state.duel.id } });
   if (data.waiting) {
@@ -1240,6 +1263,8 @@ async function finishDuel({ fromSync = false } = {}) {
     return;
   }
   const result = data.result;
+  if (state.renderedResultDuelId === state.duel.id) return;
+  state.renderedResultDuelId = state.duel.id;
   const nextLifetimeFp = Number(state.me.lifetime_fp || 0) + Number(result.fpAwarded || 0);
   const nextWeeklyFp = Number(state.me.weekly_fp || 0) + Number(result.fpAwarded || 0);
   refreshMe().catch(() => {});
@@ -1252,16 +1277,16 @@ async function finishDuel({ fromSync = false } = {}) {
   $("#duelActive").classList.add("is-hidden");
   $("#duelResult").classList.remove("is-hidden");
   setDuelTopMode("result");
-  $("#duelUserScore").textContent = `${result.userScore} benar`;
-  $("#duelOpponentScore").textContent = `${result.opponentScore} benar`;
+  $("#duelUserScore").textContent = `${result.userScore} poin`;
+  $("#duelOpponentScore").textContent = `${result.opponentScore} poin`;
   $("#duelResult").innerHTML = `
     <div class="point-orb"><span>+${result.fpAwarded}</span><small>FP</small></div>
     <p class="eyebrow">Duel selesai</p>
     <h1>${resultTitle}</h1>
     <p class="result-copy">${resultMessage}</p>
     <div class="duel-result-grid">
-      <article class="duel-result-card tilt-left"><span>Skor Kamu</span><strong>${result.userScore}/5</strong></article>
-      <article class="duel-result-card tilt-right"><span>Skor Lawan</span><strong>${result.opponentScore}/5</strong></article>
+      <article class="duel-result-card tilt-left"><span>Poin Kamu</span><strong>${result.userScore}</strong></article>
+      <article class="duel-result-card tilt-right"><span>Poin Lawan</span><strong>${result.opponentScore}</strong></article>
       <article class="duel-result-card tilt-left"><span>Lifetime FP</span><strong>${nextLifetimeFp.toLocaleString("id-ID")}</strong></article>
       <article class="duel-result-card tilt-right"><span>Weekly FP</span><strong>${nextWeeklyFp.toLocaleString("id-ID")}</strong></article>
     </div>
@@ -1280,12 +1305,14 @@ async function finishDuel({ fromSync = false } = {}) {
       payload: { duelId: state.duel.id },
     }).catch(() => {});
   }
+  if (state.resultSoundPlayedDuelIds.has(state.duel.id)) return;
+  state.resultSoundPlayedDuelIds.add(state.duel.id);
   if (result.result === "win") {
-    playSound("win");
+    playSound("win", { overlap: true });
     $("#duelPanel").classList.add("win-glow");
     launchConfetti();
   } else if (result.result === "lose") {
-    playSound("lose");
+    playSound("lose", { overlap: true });
     $("#duelPanel").classList.add("loss-shake");
   }
 }

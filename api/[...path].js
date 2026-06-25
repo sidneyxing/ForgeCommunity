@@ -10,13 +10,16 @@ const DUEL_QUESTION_COUNT = 5;
 const QUESTION_ROLLING_WINDOW_DAYS = 60;
 const QUESTION_POOL_RETENTION_DAYS = 70;
 const QUESTION_TIME_LIMIT_MS = 10 * 1000;
-const DUEL_REQUEST_WAIT_MS = 10 * 1000;
+const DUEL_REQUEST_WAIT_MS = 20 * 1000;
 const ONLINE_CUTOFF_MS = 2 * 60 * 1000;
 const MATCH_QUEUE_STALE_MS = 15 * 1000;
 const DUEL_SETTLE_GRACE_MS = 15 * 1000;
+const SESSION_KEEP_PER_USER = 5;
+const DATA_RETENTION_DAYS = 30;
 const APP_TIME_ZONE = "Asia/Makassar";
 let seedPromise;
 let weeklySeasonCheckedKey;
+let maintenanceLastRunAt = 0;
 
 export default async function handler(req, res) {
   try {
@@ -456,6 +459,7 @@ async function login(req, res, db) {
     user_agent: req.headers["user-agent"] || "",
     ip_hint: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
   }));
+  await runStorageMaintenance(db, user.id);
   await db.from("users").update({ last_seen_at: new Date().toISOString() }).eq("id", user.id);
   return send(res, 200, { ok: true, sessionToken: token }, { "Set-Cookie": sessionCookie(token) });
 }
@@ -488,6 +492,7 @@ async function settingsFor(db, userId) {
 
 async function mePayload(db, user) {
   const settings = await settingsFor(db, user.id);
+  await runStorageMaintenance(db, user.id);
   await cleanupDuelHistory(db, user.id);
   const unlocked = await db.from("user_badges").select("badge_id", { count: "exact", head: true }).eq("user_id", user.id);
   const total = await db.from("badges").select("id", { count: "exact", head: true });
@@ -539,13 +544,61 @@ async function cleanupDuelHistory(db, userId) {
   const oldRows = unwrap(await db
     .from("duels")
     .select("id")
-    .eq("user_id", userId)
+    .or(`user_id.eq.${userId},opponent_id.eq.${userId}`)
     .eq("status", "finished")
     .order("started_at", { ascending: false })
     .range(DUEL_HISTORY_LIMIT, 1000));
   if (oldRows.length) {
     unwrap(await db.from("duels").delete().in("id", oldRows.map((row) => row.id)));
   }
+}
+
+async function runStorageMaintenance(db, userId = null) {
+  const now = Date.now();
+  if (userId) await trimUserSessions(db, userId);
+  if (now - maintenanceLastRunAt < 5 * 60 * 1000) return;
+  maintenanceLastRunAt = now;
+  await Promise.all([
+    cleanupExpiredSessions(db),
+    cleanupExpiredDuelRequests(db),
+    cleanupDuelRequestHistory(db),
+    cleanupMatchQueue(db),
+    cleanupOldDuels(db),
+  ]);
+}
+
+async function cleanupExpiredSessions(db) {
+  await db.from("sessions").delete().lt("expires_at", new Date().toISOString());
+}
+
+async function trimUserSessions(db, userId) {
+  const oldSessions = unwrap(await db
+    .from("sessions")
+    .select("token_hash")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .range(SESSION_KEEP_PER_USER, 1000));
+  if (oldSessions.length) {
+    await db.from("sessions").delete().in("token_hash", oldSessions.map((session) => session.token_hash));
+  }
+}
+
+async function cleanupDuelRequestHistory(db) {
+  const now = Date.now();
+  await db.from("duel_requests").delete().in("status", ["declined", "cancelled"]).lt("responded_at", new Date(now - 60 * 60 * 1000).toISOString());
+  await db.from("duel_requests").delete().eq("status", "accepted").lt("responded_at", new Date(now - 10 * 60 * 1000).toISOString());
+}
+
+async function cleanupMatchQueue(db) {
+  const now = Date.now();
+  await db.from("duel_match_queue").update({ status: "expired", updated_at: new Date().toISOString() }).eq("status", "waiting").lt("expires_at", new Date().toISOString());
+  await db.from("duel_match_queue").delete().neq("status", "waiting").lt("updated_at", new Date(now - 60 * 60 * 1000).toISOString());
+}
+
+async function cleanupOldDuels(db) {
+  const now = Date.now();
+  await db.from("duels").update({ status: "cancelled", finished_at: new Date().toISOString() }).eq("status", "active").lt("started_at", new Date(now - 30 * 60 * 1000).toISOString());
+  await db.from("duels").delete().in("status", ["finished", "cancelled"]).lt("finished_at", new Date(now - DATA_RETENTION_DAYS * ONE_DAY_MS).toISOString());
 }
 
 async function updateProfile(req, res, db, user) {
@@ -700,7 +753,7 @@ async function respondDuelRequest(req, res, db, user, requestId) {
   if (!row) return send(res, 404, { error: "Request duel tidak ditemukan." });
   if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
     unwrap(await db.from("duel_requests").update({ status: "cancelled", responded_at: new Date().toISOString() }).eq("id", requestId));
-    return send(res, 400, { error: "Waktu accept sudah lewat 10 detik." });
+    return send(res, 400, { error: "Waktu accept sudah lewat 20 detik." });
   }
   if (data.action !== "accept") {
     unwrap(await db.from("duel_requests").update({ status: "declined", responded_at: new Date().toISOString() }).eq("id", requestId));
@@ -816,9 +869,11 @@ async function joinMatchmaking(db, user) {
 
 async function matchmakingStatus(res, db, user) {
   const queue = unwrap(await db
-    .from("duel_queue")
-    .select("status, duel_id, joined_at, last_seen_at, updated_at")
+    .from("duel_match_queue")
+    .select("status, duel_id, created_at, expires_at, updated_at")
     .eq("user_id", user.id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle());
   if (!queue || queue.status === "cancelled") {
     return send(res, 200, { waiting: false, cancelled: true });
@@ -831,20 +886,20 @@ async function matchmakingStatus(res, db, user) {
     }
   }
 
-  if (new Date(queue.last_seen_at).getTime() < Date.now() - MATCH_QUEUE_STALE_MS) {
-    unwrap(await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id));
+  if (new Date(queue.expires_at).getTime() <= Date.now()) {
+    unwrap(await db.from("duel_match_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id).eq("status", "waiting"));
     return send(res, 200, { waiting: false, cancelled: true });
   }
 
-  unwrap(await db.from("duel_queue").update({
-    last_seen_at: new Date().toISOString(),
+  unwrap(await db.from("duel_match_queue").update({
     updated_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + MATCH_QUEUE_STALE_MS).toISOString(),
   }).eq("user_id", user.id).eq("status", "waiting"));
   return send(res, 200, { waiting: true });
 }
 
 async function cancelMatchmaking(res, db, user) {
-  unwrap(await db.from("duel_queue").update({
+  unwrap(await db.from("duel_match_queue").update({
     status: "cancelled",
     updated_at: new Date().toISOString(),
   }).eq("user_id", user.id).eq("status", "waiting"));
@@ -1055,13 +1110,14 @@ async function finishDuel(req, res, db, user) {
   if (!duel || !isDuelParticipant(duel, user.id)) return send(res, 404, { error: "Duel tidak aktif." });
   if (duel.status === "finished") return sendFinishedDuel(res, db, duel, user.id);
   const answers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", data.duelId).eq("user_id", user.id));
-  if (answers.length < DUEL_QUESTION_COUNT) return send(res, 400, { error: "Jawab semua pertanyaan dulu." });
+  const pastDeadline = Date.now() >= duelAnswerDeadlineMs(duel);
+  if (answers.length < DUEL_QUESTION_COUNT && !pastDeadline) return send(res, 400, { error: "Jawab semua pertanyaan dulu." });
   if (duel.opponent_id) {
     const allAnswers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", data.duelId));
     const userAnswers = allAnswers.filter((answer) => answer.user_id === duel.user_id);
     const opponentAnswers = allAnswers.filter((answer) => answer.user_id === duel.opponent_id);
     if (userAnswers.length < DUEL_QUESTION_COUNT || opponentAnswers.length < DUEL_QUESTION_COUNT) {
-      if (Date.now() < duelAnswerDeadlineMs(duel)) {
+      if (!pastDeadline) {
         return send(res, 200, { waiting: true, status: await duelStatusPayload(db, duel, user.id) });
       }
     }
@@ -1093,13 +1149,13 @@ async function settleDuel(db, duel) {
   const opponentAnswers = duel.opponent_id
     ? allAnswers.filter((answer) => answer.user_id === duel.opponent_id)
     : [];
-  const userScore = userAnswers.filter((answer) => answer.is_correct).length;
-  const opponentScore = duel.opponent_id
+  const userCorrect = userAnswers.filter((answer) => answer.is_correct).length;
+  const opponentCorrect = duel.opponent_id
     ? opponentAnswers.filter((answer) => answer.is_correct).length
     : Number(duel.opponent_score || 0);
-  const result = userScore > opponentScore ? "win" : userScore < opponentScore ? "lose" : "draw";
   const userFp = duelPoints(userAnswers);
   const opponentFp = duel.opponent_id ? duelPoints(opponentAnswers) : 0;
+  const result = userFp > opponentFp ? "win" : userFp < opponentFp ? "lose" : "draw";
   const userAvgMs = Math.round(userAnswers.reduce((sum, answer) => sum + Number(answer.answer_time_ms || 0), 0) / Math.max(1, userAnswers.length));
   const opponentAvgMs = duel.opponent_id
     ? Math.round(opponentAnswers.reduce((sum, answer) => sum + Number(answer.answer_time_ms || 0), 0) / Math.max(1, opponentAnswers.length))
@@ -1108,8 +1164,8 @@ async function settleDuel(db, duel) {
   const updated = unwrap(await db.from("duels").update({
     status: "finished",
     result,
-    user_score: userScore,
-    opponent_score: opponentScore,
+    user_score: userFp,
+    opponent_score: opponentFp,
     user_avg_time_ms: userAvgMs,
     opponent_avg_time_ms: opponentAvgMs,
     fp_awarded: userFp,
@@ -1120,10 +1176,10 @@ async function settleDuel(db, duel) {
   if (!updated.length) return duel;
 
   const user = unwrap(await db.from("users").select("*").eq("id", duel.user_id).single());
-  await updateUserAfterDuel(db, user, result, userScore, userAnswers, userFp);
+  await updateUserAfterDuel(db, user, result, userCorrect, userAnswers, userFp);
   if (duel.opponent_id) {
     const opponent = unwrap(await db.from("users").select("*").eq("id", duel.opponent_id).single());
-    await updateUserAfterDuel(db, opponent, resultForSide(result, "opponent"), opponentScore, opponentAnswers, opponentFp);
+    await updateUserAfterDuel(db, opponent, resultForSide(result, "opponent"), opponentCorrect, opponentAnswers, opponentFp);
   }
 }
 

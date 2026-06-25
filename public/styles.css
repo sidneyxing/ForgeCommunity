@@ -519,7 +519,7 @@ select:focus {
   width: 120px;
 }
 
-.flame-orb {
+.daily-flame-icon {
   align-items: end;
   background:
     radial-gradient(ellipse at 50% 88%, rgba(244, 208, 111, 0.22), transparent 58%),
@@ -527,55 +527,14 @@ select:focus {
   border: 1px solid rgba(244, 208, 111, 0.3);
   border-radius: 14px;
   box-shadow: inset 0 0 20px rgba(155, 17, 30, 0.18);
-  display: grid;
+  display: block;
   flex: 0 0 52px;
   height: 58px;
-  justify-items: center;
-  padding-bottom: 10px;
+  object-fit: contain;
+  padding: 8px;
   position: relative;
   z-index: 1;
-}
-
-.flame-orb span,
-.flame-orb span::before,
-.flame-orb span::after {
-  display: block;
-  position: absolute;
-}
-
-.flame-orb span {
-  animation: flameDance 1.15s ease-in-out infinite alternate;
-  background:
-    radial-gradient(circle at 52% 74%, rgba(255, 253, 248, 0.95), rgba(244, 208, 111, 0.58) 28%, transparent 46%),
-    linear-gradient(180deg, #fff4b8 0%, #f4d06f 26%, #c7372e 68%, #6f0d15 100%);
-  clip-path: polygon(52% 0%, 67% 18%, 61% 35%, 84% 56%, 70% 96%, 50% 100%, 29% 96%, 16% 58%, 39% 36%, 34% 18%);
-  filter: drop-shadow(0 0 9px rgba(244, 208, 111, 0.42)) drop-shadow(0 0 16px rgba(155, 17, 30, 0.28));
-  height: 42px;
-  transform-origin: 50% 92%;
-  width: 31px;
-}
-
-.flame-orb span::before {
-  animation: innerFlameDance 880ms ease-in-out infinite alternate-reverse;
-  background: linear-gradient(180deg, #fffdf8 0%, #ffe08a 48%, rgba(199, 55, 46, 0.46) 100%);
-  clip-path: polygon(52% 0%, 66% 24%, 59% 42%, 74% 62%, 61% 100%, 39% 100%, 26% 64%, 43% 42%, 38% 24%);
-  content: "";
-  height: 27px;
-  left: 8px;
-  top: 12px;
-  width: 15px;
-}
-
-.flame-orb span::after {
-  background: linear-gradient(90deg, transparent, rgba(255, 253, 248, 0.55), transparent);
-  clip-path: polygon(52% 0%, 64% 34%, 54% 100%, 44% 100%, 36% 34%);
-  content: "";
-  filter: blur(0.2px);
-  height: 32px;
-  left: 9px;
-  opacity: 0.52;
-  top: 4px;
-  width: 12px;
+  width: 52px;
 }
 
 .daily-flame strong {

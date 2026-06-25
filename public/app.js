@@ -331,6 +331,54 @@ function levelName(points) {
   return `Level ${Math.min(100, Math.floor(Number(points || 0) / 1000) + 1)}`;
 }
 
+function numericLevel(points) {
+  return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
+}
+
+function fpDisplay(value, { signed = false, label = false } = {}) {
+  const number = Number(value || 0);
+  const prefix = signed && number >= 0 ? "+" : "";
+  return `
+    <span class="fp-chip" aria-label="${prefix}${number.toLocaleString("id-ID")} Forge Points">
+      <span class="fp-value">${prefix}${number.toLocaleString("id-ID")}</span>
+      <img class="fp-icon" src="/image/fp.png" alt="FP" loading="lazy" />
+      ${label ? `<span class="fp-label">FP</span>` : ""}
+    </span>
+  `;
+}
+
+function levelProgress(points) {
+  const level = numericLevel(points);
+  const total = Math.max(0, Number(points || 0));
+  const current = level >= 100 ? 1000 : total % 1000;
+  const required = 1000;
+  const percent = level >= 100 ? 100 : Math.max(0, Math.min(100, (current / required) * 100));
+  return { level, current, required, percent, nextLevel: Math.min(100, level + 1) };
+}
+
+function levelProgressHtml(points) {
+  const progress = levelProgress(points);
+  const caption = progress.level >= 100
+    ? "Level maksimum tercapai"
+    : `${progress.current.toLocaleString("id-ID")}/${progress.required.toLocaleString("id-ID")} menuju Level ${progress.nextLevel}`;
+  return `
+    <div class="level-progress" id="homeLevelProgress">
+      <div class="level-progress-top">
+        <span>Progress Level</span>
+        <strong>${Math.round(progress.percent)}%</strong>
+      </div>
+      <div class="level-progress-track" aria-label="Progress level ${Math.round(progress.percent)} persen">
+        <span style="width:${progress.percent}%"></span>
+      </div>
+      <small>${caption}</small>
+    </div>
+  `;
+}
+
+function badgeCountHtml(unlocked = 0, total = 0) {
+  return `<p class="profile-badge-count" id="homeBadgeCount"><strong>${Number(unlocked || 0).toLocaleString("id-ID")}/${Number(total || 0).toLocaleString("id-ID")}</strong><span>Badge unlocked</span></p>`;
+}
+
 function avgTime(user) {
   if (!user.total_answers) return "0s";
   return `${(user.total_answer_time_ms / user.total_answers / 1000).toFixed(1)}s`;
@@ -510,7 +558,7 @@ function startResultCountdown() {
 
 function renderShell() {
   $("#pillUsername").textContent = state.me.username;
-  $("#pillFp").textContent = state.me.lifetime_fp.toLocaleString("id-ID");
+  $("#pillFp").innerHTML = fpDisplay(state.me.lifetime_fp);
   $("#pillAvatar").src = avatar(state.me);
   applyAvatarColor($("#pillAvatarWrap"), state.me);
   $("#sideFire").textContent = `${state.me.fire_streak_days} hari`;
@@ -541,18 +589,30 @@ function renderDailyFlameGif() {
 function renderDashboard() {
   const user = state.me;
   const dailyLimit = state.dashboard.dailyDuelLimit || DAILY_DUEL_LIMIT;
+  const unlockedBadges = state.dashboard.unlockedBadges || 0;
+  const totalBadges = state.dashboard.totalBadges || 0;
   $("#duelLimitText").textContent = `Maksimal ${dailyLimit} duel per hari. Setiap duel berisi 5 pertanyaan, masing-masing 10 detik.`;
   $("#homeName").textContent = user.name;
   $("#homeUsername").textContent = user.username;
   $("#homeLevel").textContent = levelName(user.lifetime_fp);
-  $("#badgePreviewText").textContent = `${state.dashboard.unlockedBadges}/${state.dashboard.totalBadges} terbuka`;
+  $("#badgePreviewText").textContent = `${unlockedBadges}/${totalBadges} terbuka`;
   $("#topPreviewText").textContent = state.dashboard.top3.map((row) => `${row.rank}. ${row.username}`).join("  ") || "Belum ada ranking";
+
+  const avatarWrap = $("#homeAvatarWrap");
+  if (avatarWrap) {
+    const existingProgress = $("#homeLevelProgress");
+    const existingBadgeCount = $("#homeBadgeCount");
+    if (existingProgress) existingProgress.outerHTML = levelProgressHtml(user.lifetime_fp);
+    else avatarWrap.insertAdjacentHTML("afterend", levelProgressHtml(user.lifetime_fp));
+    if (existingBadgeCount) existingBadgeCount.outerHTML = badgeCountHtml(unlockedBadges, totalBadges);
+    else $("#homeLevelProgress")?.insertAdjacentHTML("afterend", badgeCountHtml(unlockedBadges, totalBadges));
+  }
 
   const stats = [
     ["Fire Streak", `${user.fire_streak_days} hari`],
     ["Peringkat Saat Ini", `#${state.dashboard.myRank || "-"}`],
-    ["FP Mingguan", user.weekly_fp.toLocaleString("id-ID")],
-    ["Lifetime FP", user.lifetime_fp.toLocaleString("id-ID")],
+    ["FP Mingguan", fpDisplay(user.weekly_fp)],
+    ["Lifetime FP", fpDisplay(user.lifetime_fp)],
     ["Level", levelName(user.lifetime_fp)],
     ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
   ];
@@ -743,7 +803,7 @@ function renderMemberList(members) {
     <article class="member-row" data-member='${JSON.stringify(member).replace(/'/g, "&apos;")}' tabindex="0" role="button" aria-label="Lihat profile ${member.username}">
       <span class="avatar-ring" style="--avatar-color:${profileColor(member)}"><img src="${avatar(member)}" alt="" /></span>
       <div><strong>${member.name}</strong><small>@${member.username} / ${member.given_id} · ${member.city || "-"}</small></div>
-      <div class="member-level-cell"><span>${levelName(member.lifetime_fp)}</span><small>${member.lifetime_fp.toLocaleString("id-ID")} FP</small></div>
+      <div class="member-level-cell"><span>${levelName(member.lifetime_fp)}</span><small>${fpDisplay(member.lifetime_fp)}</small></div>
       <div><span class="status-dot ${member.online ? "online" : "offline"}"></span>${member.online ? "Online" : "Offline"}</div>
       <div class="mini-actions">
         <button class="heart-action ${member.is_favourite ? "is-on" : ""}" data-relation="favourite" data-id="${member.id}" aria-label="${member.is_favourite ? "Hapus dari favorite" : "Tambah ke favorite"}">
@@ -808,8 +868,8 @@ function showMemberProfile(row) {
     ["Kota", member.city || "-"],
     ["Jenis Kelamin", genderLabel(member.gender)],
     ["Level", levelName(member.lifetime_fp)],
-    ["Lifetime FP", member.lifetime_fp.toLocaleString("id-ID")],
-    ["Weekly FP", member.weekly_fp.toLocaleString("id-ID")],
+    ["Lifetime FP", fpDisplay(member.lifetime_fp)],
+    ["Weekly FP", fpDisplay(member.weekly_fp)],
     ["Duel Count", totalDuels.toLocaleString("id-ID")],
     ["Rekor Duel", duelRecordBoxes(member.wins, member.losses, member.draws)],
     ["Jawaban Benar", (member.total_correct || 0).toLocaleString("id-ID")],
@@ -1053,7 +1113,7 @@ function renderLeaderboard(data) {
       <strong>#${row.rank}</strong>
       <div class="leader-player"><span class="avatar-ring" style="--avatar-color:${profileColor(row)}"><img src="${avatar(row)}" alt="" /></span><span><strong>${row.name}</strong><small>@${row.username}</small></span></div>
       <span>${levelName(row.lifetime_fp)}</span>
-      <strong>${row.weekly_fp.toLocaleString("id-ID")}</strong>
+      <strong>${fpDisplay(row.weekly_fp)}</strong>
       <span>${row.wins}</span>
       <span>${row.avg_time}</span>
     </article>
@@ -1075,7 +1135,7 @@ function renderLeaderboard(data) {
     ${topList("Top 3 Fire Streak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
     ${topList("Top 3 Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
     ${topList("Top 3 Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
-    ${topList("Top 3 Lifetime FP", data.legends?.lifetime || [], (row) => `${Number(row.lifetime_fp || 0).toLocaleString("id-ID")} FP`)}
+    ${topList("Top 3 Lifetime FP", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
   `;
 }
 
@@ -1146,12 +1206,12 @@ function renderAbout() {
   const items = [
     ["Apa itu FORGE", "Foundation Of Resilience, Growth & Excellence: duel arena komunitas untuk menghidupkan interaksi positif."],
     ["Tujuan Komunitas", "Membuat member aktif, saling mengenal, dan bertumbuh lewat pertanyaan berbobot."],
-    ["Forge Points", "FP duel maksimal 100. Jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100."],
+    ["Forge Points", `<span class="about-fp-line"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
-    ["Sistem Level", "Level 1 sampai Level 100. Setiap 1000 lifetime FP naik 1 level."],
-    ["Hadiah Mingguan", "Recap juara idealnya Minggu 23:50 WITA, lalu weekly FP reset Senin 00:00 WITA."],
+    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
+    ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
-    ["Tutorial Singkat", "Daftar dengan nomor WhatsApp, login, mulai duel, kumpulkan FP, dan buka badges."],
+    ["Tutorial Singkat", `Daftar dengan nomor WhatsApp, login, mulai duel, kumpulkan <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span>, dan buka badges.`],
     ["Masih Bingung?", "Silakan bertanya atau hubungi admin melalui contact person di footer."],
   ];
   $("#aboutGrid").innerHTML = items.map(([title, text]) => `<article class="about-card"><h3>${title}</h3><p>${text}</p></article>`).join("");
@@ -1183,7 +1243,8 @@ function renderSettings() {
         ["Kota", state.me.city || "-"],
         ["Jenis Kelamin", genderLabel(state.me.gender)],
         ["Level Pemain", levelName(state.me.lifetime_fp)],
-        ["Total Poin", state.me.lifetime_fp.toLocaleString("id-ID")],
+        ["Total Poin", fpDisplay(state.me.lifetime_fp)],
+        ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],
         ["Rekor Duel", duelRecordBoxes(state.me.wins, state.me.losses, state.me.draws)],
         ["Jawaban Benar", state.me.total_correct],
         ["Rata-rata Waktu", avgTime(state.me)],
@@ -1205,7 +1266,7 @@ function renderDuelHistory() {
           <strong>${duelResultLabel(duelHistoryResult(duel))}</strong>
           <small>vs ${duel.opponent_name} - ${new Date(duel.started_at).toLocaleString("id-ID")}</small>
         </div>
-        <span>+${duel.fp_awarded || 0} FP</span>
+        <span>${fpDisplay(duel.fp_awarded || 0, { signed: true })}</span>
       </article>
     `).join("")}</div>`
     : `<p class="muted">Belum ada riwayat duel.</p>`;
@@ -1386,15 +1447,15 @@ async function finishDuel({ fromSync = false } = {}) {
   $("#duelUserScore").textContent = `${result.userScore} poin`;
   $("#duelOpponentScore").textContent = `${result.opponentScore} poin`;
   $("#duelResult").innerHTML = `
-    <div class="point-orb"><span>+${result.fpAwarded}</span><small>FP</small></div>
+    <div class="point-orb"><span>${fpDisplay(result.fpAwarded, { signed: true })}</span><small>Forge Points</small></div>
     <p class="eyebrow">Duel selesai</p>
     <h1>${resultTitle}</h1>
     <p class="result-copy">${resultMessage}</p>
     <div class="duel-result-grid">
       <article class="duel-result-card tilt-left"><span>Poin Kamu</span><strong>${result.userScore}</strong></article>
       <article class="duel-result-card tilt-right"><span>Poin Lawan</span><strong>${result.opponentScore}</strong></article>
-      <article class="duel-result-card tilt-left"><span>Lifetime FP</span><strong>${nextLifetimeFp.toLocaleString("id-ID")}</strong></article>
-      <article class="duel-result-card tilt-right"><span>Weekly FP</span><strong>${nextWeeklyFp.toLocaleString("id-ID")}</strong></article>
+      <article class="duel-result-card tilt-left"><span>Lifetime FP</span><strong>${fpDisplay(nextLifetimeFp)}</strong></article>
+      <article class="duel-result-card tilt-right"><span>Weekly FP</span><strong>${fpDisplay(nextWeeklyFp)}</strong></article>
     </div>
     <div class="duel-result-actions">
       <button class="btn primary" id="rematchCountdownBtn">Cari Lawan Baru (20)</button>

@@ -1387,22 +1387,29 @@ select:focus {
 
 .mini-actions .heart-action {
   align-items: center;
-  background: rgba(255, 253, 248, 0.72);
-  border-color: rgba(155, 17, 30, 0.24);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   color: var(--red);
   display: inline-flex;
-  font-size: 1.35rem;
-  height: 44px;
+  font-size: 2rem;
+  height: 38px;
   justify-content: center;
   line-height: 1;
-  min-width: 44px;
+  min-width: 38px;
   padding: 0;
+  transition: color 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+
+.mini-actions .heart-action:hover {
+  background: transparent;
+  transform: scale(1.08);
 }
 
 .mini-actions .heart-action.is-on {
-  background: var(--red);
-  border-color: var(--red);
-  color: #fff;
+  background: transparent;
+  border: 0;
+  color: var(--red);
 }
 
 .mini-actions .duel-action {
@@ -1842,6 +1849,177 @@ select:focus {
   min-height: 34px;
   padding: 0.45rem 0.8rem;
   text-transform: uppercase;
+}
+
+
+
+.fp-chip {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.28rem;
+  justify-content: center;
+  line-height: 1;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.fp-chip .fp-value {
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+}
+
+.fp-chip .fp-icon,
+.fp-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 1.15em;
+  object-fit: contain;
+  width: 1.15em;
+}
+
+.fp-chip .fp-label {
+  color: inherit;
+  font-size: 0.72em;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.profile-pill .fp-chip {
+  color: var(--red);
+  font-weight: 1000;
+}
+
+.stat-card .fp-chip,
+.member-level-cell .fp-chip,
+.member-profile-stats .fp-chip,
+.profile-stat-grid .fp-chip,
+.leader-row .fp-chip,
+.legend-person .fp-chip,
+.duel-history-item .fp-chip,
+.duel-result-card .fp-chip {
+  color: var(--red);
+}
+
+.level-progress {
+  background: rgba(255, 253, 248, 0.72);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  margin: 0.85rem auto 0.65rem;
+  padding: 0.72rem;
+  text-align: left;
+  width: min(100%, 230px);
+}
+
+.level-progress-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.45rem;
+}
+
+.level-progress-top span,
+.level-progress small,
+.profile-badge-count span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.level-progress-top strong {
+  color: var(--red);
+  font-size: 0.9rem;
+}
+
+.level-progress-track {
+  background: rgba(169, 112, 47, 0.16);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.level-progress-track span {
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  transition: width 380ms ease;
+}
+
+.level-progress small {
+  display: block;
+  letter-spacing: 0;
+  margin-top: 0.45rem;
+  text-transform: none;
+}
+
+.profile-badge-count {
+  align-items: center;
+  background: linear-gradient(135deg, rgba(155, 17, 30, 0.08), rgba(244, 208, 111, 0.16));
+  border: 1px solid rgba(155, 17, 30, 0.14);
+  border-radius: 14px;
+  display: flex;
+  gap: 0.55rem;
+  justify-content: center;
+  margin: 0 auto 0.8rem;
+  padding: 0.58rem 0.72rem;
+  width: min(100%, 230px);
+}
+
+.profile-badge-count strong {
+  color: var(--red);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.about-fp-line {
+  align-items: flex-start;
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.about-fp-line img {
+  flex: 0 0 auto;
+  height: 1.7rem;
+  margin-top: 0.05rem;
+  object-fit: contain;
+  width: 1.7rem;
+}
+
+.about-fp-name {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.28rem;
+  font-weight: 900;
+}
+
+.about-fp-name img {
+  display: inline-block;
+  height: 1.1em;
+  object-fit: contain;
+  width: 1.1em;
+}
+
+.point-orb .fp-chip {
+  color: var(--red);
+  font-size: clamp(2.25rem, 4.7vw, 3.75rem);
+  font-weight: 1000;
+  line-height: 0.9;
+}
+
+.point-orb .fp-chip .fp-value {
+  font-size: inherit;
+}
+
+.point-orb .fp-chip .fp-icon {
+  filter: drop-shadow(0 5px 8px rgba(155, 17, 30, 0.16));
+  height: 0.82em;
+  width: 0.82em;
 }
 
 .footer {

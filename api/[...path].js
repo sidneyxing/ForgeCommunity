@@ -833,7 +833,14 @@ async function badges(res, db, user) {
   const badgeRows = unwrap(await db.from("badges").select("id, name, description, img_url").order("name", { ascending: true }));
   const earned = unwrap(await db.from("user_badges").select("*").eq("user_id", user.id));
   const earnedById = new Map(earned.map((item) => [item.badge_id, item.earned_at]));
-  const badges = badgeRows.map((badge) => ({ ...badge, earned_at: earnedById.get(badge.id) || null }));
+  const badges = badgeRows
+    .map((badge) => ({ ...badge, earned_at: earnedById.get(badge.id) || null }))
+    .sort((a, b) => {
+      if (a.earned_at && b.earned_at) return new Date(a.earned_at).getTime() - new Date(b.earned_at).getTime();
+      if (a.earned_at) return -1;
+      if (b.earned_at) return 1;
+      return a.name.localeCompare(b.name);
+    });
   return send(res, 200, { total: badges.length, unlocked: earned.length, badges });
 }
 

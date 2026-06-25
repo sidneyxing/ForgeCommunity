@@ -38,6 +38,7 @@ const state = {
   duelStatusTimer: null,
   matchmakingTimer: null,
   duelStartTimer: null,
+  duelStartCountdownLastSecond: null,
   isMatchmaking: false,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
@@ -59,6 +60,8 @@ const pages = {
 const soundFiles = {
   button: "/sounds/button-click.mp3",
   duelStart: "/sounds/duel-start.mp3",
+  matchBeep: "/sounds/beep.mp3",
+  matchStart: "/sounds/ting.mp3",
   tick: "/sounds/clock-tick.mp3",
   correct: "/sounds/correct.mp3",
   wrong: "/sounds/wrong.mp3",
@@ -245,6 +248,8 @@ function tone(name) {
     win: 1040,
     lose: 130,
     duelStart: 560,
+    matchBeep: 680,
+    matchStart: 980,
   }[name] || 440;
   osc.frequency.value = frequency;
   osc.type = name === "lose" || name === "wrong" ? "sawtooth" : "sine";
@@ -441,6 +446,7 @@ function clearMatchmakingWatcher() {
 function clearDuelStartTimer() {
   clearInterval(state.duelStartTimer);
   state.duelStartTimer = null;
+  state.duelStartCountdownLastSecond = null;
 }
 
 function setDuelTopMode(mode) {
@@ -509,6 +515,13 @@ function renderShell() {
   $("#duelUserAvatar").src = avatar(state.me);
   applyAvatarColor($("#duelUserAvatarWrap"), state.me);
   $("#duelUserName").textContent = state.me.username;
+  const fireIcon = $(".daily-flame-icon");
+  if (fireIcon?.tagName === "IMG") {
+    fireIcon.src = "/gif/fire.gif";
+    fireIcon.alt = "";
+  } else if (fireIcon) {
+    fireIcon.style.backgroundImage = "url('/gif/fire.gif')";
+  }
 }
 
 function renderDashboard() {
@@ -646,6 +659,7 @@ function startRequestCountdownTimer() {
 }
 
 async function loadMembers() {
+  normalizeMemberTabs();
   const q = encodeURIComponent($("#memberSearch").value.trim());
   const tab = getActiveMemberTab();
   const cacheKey = `members:${q}:all`;
@@ -673,9 +687,18 @@ async function loadMembers() {
 function filterMembersForTab(members, tab) {
   let filtered = members;
   if (tab === "online") filtered = members.filter((member) => member.online);
-  if (tab === "friends") filtered = members.filter((member) => member.is_friend);
   if (tab === "favourites") filtered = members.filter((member) => member.is_favourite);
   return sortMembersForDisplay(filtered);
+}
+
+function normalizeMemberTabs() {
+  const tabWrap = $("#memberTab");
+  if (!tabWrap) return;
+  tabWrap.querySelector("[data-member-tab='friends']")?.remove();
+  const active = tabWrap.querySelector(".is-active");
+  if (!active || active.dataset.memberTab === "friends") {
+    tabWrap.querySelector("[data-member-tab='all']")?.classList.add("is-active");
+  }
 }
 
 function memberRandomRank(memberId) {
@@ -709,9 +732,10 @@ function renderMemberList(members) {
       <div class="member-level-cell"><span>${levelName(member.lifetime_fp)}</span><small>${member.lifetime_fp.toLocaleString("id-ID")} FP</small></div>
       <div><span class="status-dot ${member.online ? "online" : "offline"}"></span>${member.online ? "Online" : "Offline"}</div>
       <div class="mini-actions">
-        <button class="${member.is_friend ? "is-on" : ""}" data-relation="friend" data-id="${member.id}">Friend</button>
-        <button class="${member.is_favourite ? "is-on" : ""}" data-relation="favourite" data-id="${member.id}">Fav</button>
-        <button data-invite="${member.id}" ${member.online ? "" : "disabled"}>${member.online ? "Invite Duel" : "Offline"}</button>
+        <button class="heart-action ${member.is_favourite ? "is-on" : ""}" data-relation="favourite" data-id="${member.id}" aria-label="${member.is_favourite ? "Hapus dari favorite" : "Tambah ke favorite"}">
+          <span aria-hidden="true">${member.is_favourite ? "&#9829;" : "&#9825;"}</span>
+        </button>
+        <button class="duel-action" data-invite="${member.id}" ${member.online ? "" : "disabled"}>${member.online ? "Invite Duel" : "Offline"}</button>
       </div>
     </article>
   `).join("") || `<p class="muted">Belum ada member lain. Daftarkan minimal 2 akun agar Member Arena terisi.</p>`;
@@ -797,13 +821,15 @@ async function toggleRelation(button) {
       body: { type: button.dataset.relation },
     });
     const relation = data.relation || {};
-    const friendBtn = row?.querySelector("[data-relation='friend']");
     const favouriteBtn = row?.querySelector("[data-relation='favourite']");
-    friendBtn?.classList.toggle("is-on", Boolean(relation.is_friend));
-    favouriteBtn?.classList.toggle("is-on", Boolean(relation.is_favourite));
+    const isFavourite = Boolean(relation.is_favourite);
+    favouriteBtn?.classList.toggle("is-on", isFavourite);
+    favouriteBtn?.setAttribute("aria-label", isFavourite ? "Hapus dari favorite" : "Tambah ke favorite");
+    const icon = favouriteBtn?.querySelector("span");
+    if (icon) icon.innerHTML = isFavourite ? "&#9829;" : "&#9825;";
     state.cache = Object.fromEntries(Object.entries(state.cache).filter(([key]) => !key.startsWith("members:")));
     const tab = getActiveMemberTab();
-    if ((tab === "friends" && !relation.is_friend) || (tab === "favourites" && !relation.is_favourite)) {
+    if (tab === "favourites" && !relation.is_favourite) {
       row?.remove();
       if (!$("#memberList").children.length) {
         $("#memberList").innerHTML = `<p class="muted">Belum ada member di tab ini.</p>`;
@@ -871,11 +897,12 @@ function beginDuel(duel) {
 function startSyncedDuelCountdown() {
   const startsAtMs = new Date(state.duel?.starts_at || Date.now()).getTime();
   const delayMs = startsAtMs - Date.now();
+  state.duelStartCountdownLastSecond = null;
   if (delayMs <= 250) {
     $("#duelResult").classList.add("is-hidden");
     $("#duelActive").classList.remove("is-hidden");
     setDuelTopMode("active");
-    playSound("duelStart");
+    playSound("matchStart", { overlap: true });
     renderQuestion();
     return;
   }
@@ -885,6 +912,10 @@ function startSyncedDuelCountdown() {
   setDuelTopMode("result");
   const renderCountdown = () => {
     const left = Math.max(1, Math.ceil((startsAtMs - Date.now()) / 1000));
+    if (left !== state.duelStartCountdownLastSecond && Date.now() < startsAtMs) {
+      state.duelStartCountdownLastSecond = left;
+      playSound("matchBeep", { overlap: true });
+    }
     $("#duelResult").innerHTML = `
       <p class="eyebrow">Lawan ditemukan</p>
       <h1>Mulai dalam ${left}</h1>
@@ -892,10 +923,11 @@ function startSyncedDuelCountdown() {
     `;
     if (Date.now() >= startsAtMs) {
       clearDuelStartTimer();
+      state.duelStartCountdownLastSecond = null;
       $("#duelResult").classList.add("is-hidden");
       $("#duelActive").classList.remove("is-hidden");
       setDuelTopMode("active");
-      playSound("duelStart");
+      playSound("matchStart", { overlap: true });
       renderQuestion();
     }
   };
@@ -1023,6 +1055,9 @@ async function loadBadges() {
 
 function renderBadges(data) {
   $("#badgeProgress").textContent = `${data.unlocked}/${data.total} terbuka`;
+  const badgeDetail = $("#badgeDetail");
+  badgeDetail?.classList.add("is-hidden");
+  if (badgeDetail) badgeDetail.innerHTML = "";
   $("#badgeGrid").innerHTML = data.badges.map((badge) => `
     <button class="badge-tile ${badge.earned_at ? "" : "locked"}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
       <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
@@ -1040,12 +1075,28 @@ function badgeVisual(badge) {
 
 function showBadgeDetail(button) {
   const badge = JSON.parse(button.dataset.badge.replace(/&apos;/g, "'"));
-  $("#badgeDetail").innerHTML = `
-    <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
-    <h3>${badge.name}</h3>
-    <p>${badge.description}</p>
-    <p><strong>Status:</strong> ${badge.earned_at ? `Terbuka pada ${new Date(badge.earned_at).toLocaleDateString("id-ID")}` : "Terkunci"}</p>
-  `;
+  document.querySelector(".badge-modal")?.remove();
+  const earnedAt = badge.earned_at ? formatDateTimeId(badge.earned_at) : null;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="badge-modal" role="dialog" aria-modal="true">
+      <button class="badge-modal-backdrop" type="button" data-badge-close aria-label="Tutup detail badge"></button>
+      <article class="badge-modal-card">
+        <button class="badge-modal-close" type="button" data-badge-close aria-label="Tutup">x</button>
+        <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
+        <h3>${escapeHtml(badge.name)}</h3>
+        <p>${escapeHtml(badge.description)}</p>
+        <p><strong>Status:</strong> ${badge.earned_at ? "Terbuka" : "Terkunci"}</p>
+        ${earnedAt ? `<p><strong>Earned at:</strong> ${earnedAt}</p>` : ""}
+      </article>
+    </div>
+  `);
+}
+
+function formatDateTimeId(value) {
+  return new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function renderAbout() {
@@ -1427,6 +1478,11 @@ function bindEvents() {
   $("#badgeGrid").addEventListener("click", (event) => {
     const button = event.target.closest(".badge-tile");
     if (button) showBadgeDetail(button);
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-badge-close]")) {
+      document.querySelector(".badge-modal")?.remove();
+    }
   });
   $("#answersGrid").addEventListener("click", (event) => {
     const button = event.target.closest(".answer-btn");

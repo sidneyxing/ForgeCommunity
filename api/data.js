@@ -68,9 +68,6 @@ export function makeBadgeSeeds() {
     id: badge[0],
     name: badge[1],
     description: badge[2],
-    unlock_rule: badge[3],
-    tier: badge[4],
-    icon: badge[5],
-    sort_order: index + 1,
+    img_url: `/badges/b${index + 1}.png`,
   }));
 }

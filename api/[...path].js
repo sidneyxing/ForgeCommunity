@@ -14,7 +14,8 @@ const DUEL_REQUEST_WAIT_MS = 20 * 1000;
 const ONLINE_CUTOFF_MS = 2 * 60 * 1000;
 const MATCH_QUEUE_STALE_MS = 15 * 1000;
 const DUEL_SETTLE_GRACE_MS = 15 * 1000;
-const SESSION_KEEP_PER_USER = 5;
+const SESSION_DAYS = 180;
+const SESSION_KEEP_PER_USER = 1;
 const DATA_RETENTION_DAYS = 30;
 const APP_TIME_ZONE = "Asia/Makassar";
 let seedPromise;
@@ -145,7 +146,7 @@ function bearerToken(req) {
 
 function sessionCookie(token, expired = false) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  const maxAge = expired ? 0 : 60 * 60 * 24 * 30;
+  const maxAge = expired ? 0 : 60 * 60 * 24 * SESSION_DAYS;
   return `forge_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge}`;
 }
 
@@ -249,6 +250,15 @@ function resultForSide(result, side) {
   return result;
 }
 
+function resultForDuel(duel) {
+  if (duel.status !== "finished") return null;
+  const userFp = Number(duel.fp_awarded ?? duel.user_score ?? 0);
+  const opponentFp = Number(duel.opponent_fp_awarded ?? duel.opponent_score ?? 0);
+  if (userFp > opponentFp) return "win";
+  if (userFp < opponentFp) return "lose";
+  return "draw";
+}
+
 function scoreForSide(duel, side) {
   return side === "opponent"
     ? { mine: Number(duel.opponent_score || 0), theirs: Number(duel.user_score || 0) }
@@ -296,15 +306,12 @@ async function ensureSeed(db) {
     unwrap(await db.from("questions").insert(seedQuestions.map((q, index) => ({
       id: `q_${String(index + 1).padStart(3, "0")}`,
       category: q[0],
-      subcategory: q[1],
       question: q[2],
       option_a: q[3],
       option_b: q[4],
       option_c: q[5],
       option_d: q[6],
       correct_option: q[7],
-      explanation: "Review jawaban benar setelah duel.",
-      difficulty: "easy",
       active: true,
     }))));
   }
@@ -364,7 +371,7 @@ async function ensureWeeklySeason(db) {
   const previousWeek = state.value;
   const existingSnapshot = await db
     .from("weekly_rank_snapshots")
-    .select("id", { count: "exact", head: true })
+    .select("week_key", { count: "exact", head: true })
     .eq("week_key", previousWeek);
 
   if (!existingSnapshot.error && !existingSnapshot.count) {
@@ -379,13 +386,11 @@ async function ensureWeeklySeason(db) {
 
     if (leaders.length) {
       unwrap(await db.from("weekly_rank_snapshots").upsert(leaders.map((leader, index) => ({
-        id: `weekly_${previousWeek}_rank_${index + 1}`,
-        user_id: leader.id,
         week_key: previousWeek,
+        user_id: leader.id,
         rank: index + 1,
         weekly_fp: leader.weekly_fp,
-        prize_label: index === 0 ? "Champion of the Week" : `Weekly Rank ${index + 1}`,
-      })), { onConflict: "id" }));
+      })), { onConflict: "week_key,rank" }));
 
       for (const leader of leaders) {
         await awardBadges(db, leader.id);
@@ -452,10 +457,12 @@ async function login(req, res, db) {
     return send(res, 401, { error: "Username atau password salah." });
   }
   const token = id("sess");
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * ONE_DAY_MS).toISOString();
+  await db.from("sessions").delete().eq("user_id", user.id);
   unwrap(await db.from("sessions").insert({
     token_hash: await digest(token),
     user_id: user.id,
-    expires_at: new Date(Date.now() + 30 * ONE_DAY_MS).toISOString(),
+    expires_at: expiresAt,
     user_agent: req.headers["user-agent"] || "",
     ip_hint: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
   }));
@@ -478,7 +485,10 @@ async function requireUser(req, db) {
     throw Object.assign(new Error("Session expired."), { status: 401 });
   }
   const user = unwrap(await db.from("users").select("*").eq("id", session.user_id).single());
-  await db.from("users").update({ last_seen_at: new Date().toISOString() }).eq("id", user.id);
+  await Promise.all([
+    db.from("users").update({ last_seen_at: new Date().toISOString() }).eq("id", user.id),
+    db.from("sessions").update({ expires_at: new Date(Date.now() + SESSION_DAYS * ONE_DAY_MS).toISOString() }).eq("token_hash", await digest(token)),
+  ]);
   return user;
 }
 
@@ -501,7 +511,7 @@ async function mePayload(db, user) {
   const duelsToday = await duelsTodayCount(db, user.id);
   const duelRows = unwrap(await db
     .from("duels")
-    .select("id, user_id, opponent_id, opponent_name, result, user_score, opponent_score, fp_awarded, opponent_fp_awarded, started_at, finished_at")
+    .select("id, user_id, opponent_id, opponent_name, user_score, opponent_score, fp_awarded, opponent_fp_awarded, started_at, finished_at")
     .or(`user_id.eq.${user.id},opponent_id.eq.${user.id}`)
     .eq("status", "finished")
     .order("started_at", { ascending: false })
@@ -519,7 +529,7 @@ async function mePayload(db, user) {
     return {
       ...duel,
       opponent_name: otherById.get(opponentId)?.username || duel.opponent_name || "Forge Rival",
-      result: resultForSide(duel.result, side),
+      result: resultForSide(resultForDuel(duel), side),
       user_score: side === "user" ? duel.user_score : duel.opponent_score,
       opponent_score: side === "user" ? duel.opponent_score : duel.user_score,
       fp_awarded: side === "user" ? duel.fp_awarded : Number(duel.opponent_fp_awarded || 0),
@@ -591,8 +601,9 @@ async function cleanupDuelRequestHistory(db) {
 
 async function cleanupMatchQueue(db) {
   const now = Date.now();
-  await db.from("duel_match_queue").update({ status: "expired", updated_at: new Date().toISOString() }).eq("status", "waiting").lt("expires_at", new Date().toISOString());
-  await db.from("duel_match_queue").delete().neq("status", "waiting").lt("updated_at", new Date(now - 60 * 60 * 1000).toISOString());
+  await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("status", "waiting").lt("last_seen_at", new Date(now - MATCH_QUEUE_STALE_MS).toISOString());
+  await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("status", "matched").lt("updated_at", new Date(now - 2 * 60 * 1000).toISOString());
+  await db.from("duel_queue").delete().eq("status", "cancelled").lt("updated_at", new Date(now - 60 * 60 * 1000).toISOString());
 }
 
 async function cleanupOldDuels(db) {
@@ -638,12 +649,12 @@ async function updateSettings(req, res, db, user) {
 async function members(req, res, db, user) {
   const q = String(req.query.q || "").trim();
   const tab = String(req.query.tab || "all");
-  const rels = unwrap(await db.from("relationships").select("*").eq("owner_id", user.id));
+  const rels = unwrap(await db.from("relationships").select("owner_id, target_id, is_favourite").eq("owner_id", user.id));
   const relByTarget = new Map(rels.map((rel) => [rel.target_id, rel]));
-  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, profile_color, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_seen_at").neq("id", user.id);
+  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_seen_at").neq("id", user.id);
   if (q) query = query.or(`username.ilike.%${q}%,name.ilike.%${q}%,given_id.ilike.%${q}%`);
-  if (tab === "friends" || tab === "favourites") {
-    const ids = rels.filter((rel) => tab === "friends" ? rel.is_friend : rel.is_favourite).map((rel) => rel.target_id);
+  if (tab === "favourites") {
+    const ids = rels.filter((rel) => rel.is_favourite).map((rel) => rel.target_id);
     if (!ids.length) return send(res, 200, { members: [] });
     query = query.in("id", ids);
   }
@@ -652,7 +663,7 @@ async function members(req, res, db, user) {
   const members = rows.map((member) => {
     const rel = relByTarget.get(member.id) || {};
     const online = member.last_seen_at && new Date(member.last_seen_at).getTime() > onlineCutoff;
-    return { ...member, online, is_friend: Boolean(rel.is_friend), is_favourite: Boolean(rel.is_favourite) };
+    return { ...member, online, is_friend: true, is_favourite: Boolean(rel.is_favourite) };
   }).filter((member) => tab !== "online" || member.online);
   return send(res, 200, { members });
 }
@@ -660,15 +671,15 @@ async function members(req, res, db, user) {
 async function relation(req, res, db, user, targetId) {
   if (targetId === user.id) return send(res, 400, { error: "Tidak bisa menandai diri sendiri." });
   const data = body(req);
-  const field = data.type === "favourite" ? "is_favourite" : "is_friend";
-  const current = unwrap(await db.from("relationships").select("*").eq("owner_id", user.id).eq("target_id", targetId).maybeSingle());
+  if (data.type !== "favourite") return send(res, 200, { ok: true, relation: { is_friend: true, is_favourite: false } });
+  const current = unwrap(await db.from("relationships").select("owner_id, target_id, is_favourite").eq("owner_id", user.id).eq("target_id", targetId).maybeSingle());
   let next;
   if (!current) {
-    next = unwrap(await db.from("relationships").insert({ owner_id: user.id, target_id: targetId, [field]: true }).select("*").single());
+    next = unwrap(await db.from("relationships").insert({ owner_id: user.id, target_id: targetId, is_favourite: true }).select("owner_id, target_id, is_favourite").single());
   } else {
-    next = unwrap(await db.from("relationships").update({ [field]: !current[field], updated_at: new Date().toISOString() }).eq("owner_id", user.id).eq("target_id", targetId).select("*").single());
+    next = unwrap(await db.from("relationships").update({ is_favourite: !current.is_favourite }).eq("owner_id", user.id).eq("target_id", targetId).select("owner_id, target_id, is_favourite").single());
   }
-  return send(res, 200, { ok: true, relation: { is_friend: Boolean(next.is_friend), is_favourite: Boolean(next.is_favourite) } });
+  return send(res, 200, { ok: true, relation: { is_friend: true, is_favourite: Boolean(next.is_favourite) } });
 }
 
 async function inviteDuelRequest(res, db, user, targetId) {
@@ -708,10 +719,10 @@ async function duelRequests(res, db, user) {
   const targetIds = [...new Set(rows.map((row) => row.target_id))];
   const userIds = [...new Set([...requesterIds, ...targetIds])];
   const requesters = requesterIds.length
-    ? unwrap(await db.from("users").select("id, username, name, profile_color").in("id", requesterIds))
+    ? unwrap(await db.from("users").select("id, username, name").in("id", requesterIds))
     : [];
   const users = userIds.length
-    ? unwrap(await db.from("users").select("id, username, name, profile_color").in("id", userIds))
+    ? unwrap(await db.from("users").select("id, username, name").in("id", userIds))
     : [];
   const byId = new Map(requesters.map((requester) => [requester.id, requester]));
   const userById = new Map(users.map((row) => [row.id, row]));
@@ -773,7 +784,7 @@ async function cleanupExpiredDuelRequests(db) {
 }
 
 async function leaderboard(res, db) {
-  const rows = unwrap(await db.from("users").select("id, name, username, gender, profile_color, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
+  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
   const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
   const fire = [...rows].sort((a, b) => b.fire_streak_days - a.fire_streak_days).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
   const mostWins = [...rows].sort((a, b) => b.wins - a.wins)[0] || null;
@@ -787,7 +798,7 @@ async function leaderboard(res, db) {
   const previousWeekRows = latestSnapshot
     ? unwrap(await db
       .from("weekly_rank_snapshots")
-      .select("user_id, week_key, rank, weekly_fp, prize_label, created_at")
+      .select("user_id, week_key, rank, weekly_fp, created_at")
       .eq("week_key", latestSnapshot.week_key)
       .order("rank", { ascending: true })
       .limit(3))
@@ -819,7 +830,7 @@ async function leaderboard(res, db) {
 
 async function badges(res, db, user) {
   await awardBadges(db, user.id);
-  const badgeRows = unwrap(await db.from("badges").select("*").order("sort_order", { ascending: true }));
+  const badgeRows = unwrap(await db.from("badges").select("id, name, description, img_url").order("name", { ascending: true }));
   const earned = unwrap(await db.from("user_badges").select("*").eq("user_id", user.id));
   const earnedById = new Map(earned.map((item) => [item.badge_id, item.earned_at]));
   const badges = badgeRows.map((badge) => ({ ...badge, earned_at: earnedById.get(badge.id) || null }));
@@ -869,8 +880,8 @@ async function joinMatchmaking(db, user) {
 
 async function matchmakingStatus(res, db, user) {
   const queue = unwrap(await db
-    .from("duel_match_queue")
-    .select("status, duel_id, created_at, expires_at, updated_at")
+    .from("duel_queue")
+    .select("status, duel_id, last_seen_at, updated_at")
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -886,20 +897,20 @@ async function matchmakingStatus(res, db, user) {
     }
   }
 
-  if (new Date(queue.expires_at).getTime() <= Date.now()) {
-    unwrap(await db.from("duel_match_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id).eq("status", "waiting"));
+  if (queue.status === "waiting" && new Date(queue.last_seen_at).getTime() <= Date.now() - MATCH_QUEUE_STALE_MS) {
+    unwrap(await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id).eq("status", "waiting"));
     return send(res, 200, { waiting: false, cancelled: true });
   }
 
-  unwrap(await db.from("duel_match_queue").update({
+  unwrap(await db.from("duel_queue").update({
     updated_at: new Date().toISOString(),
-    expires_at: new Date(Date.now() + MATCH_QUEUE_STALE_MS).toISOString(),
+    last_seen_at: new Date().toISOString(),
   }).eq("user_id", user.id).eq("status", "waiting"));
   return send(res, 200, { waiting: true });
 }
 
 async function cancelMatchmaking(res, db, user) {
-  unwrap(await db.from("duel_match_queue").update({
+  unwrap(await db.from("duel_queue").update({
     status: "cancelled",
     updated_at: new Date().toISOString(),
   }).eq("user_id", user.id).eq("status", "waiting"));
@@ -955,10 +966,9 @@ async function ensureDailyQuestionPool(db, force = false) {
     : allQuestions;
   const selectedPool = shuffle(poolSource).slice(0, targetPoolSize);
 
-  unwrap(await db.from("daily_question_pool").upsert(selectedPool.map((question, index) => ({
+  unwrap(await db.from("daily_question_pool").upsert(selectedPool.map((question) => ({
     pool_date: poolDate,
     question_id: question.id,
-    position: index + 1,
   })), { onConflict: "pool_date,question_id" }));
 
   await db.from("daily_question_pool").delete().lt("pool_date", daysAgoDate(QUESTION_POOL_RETENTION_DAYS));
@@ -970,16 +980,14 @@ async function dailyDuelQuestions(db) {
   let poolRows = unwrap(await db
     .from("daily_question_pool")
     .select("question_id")
-    .eq("pool_date", poolDate)
-    .order("position", { ascending: true }));
+    .eq("pool_date", poolDate));
 
   if (poolRows.length < DUEL_QUESTION_COUNT) {
     await ensureDailyQuestionPool(db, true);
     poolRows = unwrap(await db
       .from("daily_question_pool")
       .select("question_id")
-      .eq("pool_date", poolDate)
-      .order("position", { ascending: true }));
+      .eq("pool_date", poolDate));
   }
 
   const selectedIds = shuffle(poolRows).slice(0, DUEL_QUESTION_COUNT).map((row) => row.question_id);
@@ -1005,7 +1013,7 @@ async function duelPayload(db, duel, viewerId) {
   const questions = await duelQuestions(db, duel.id);
   const opponentId = participantSide(duel, viewerId) === "user" ? duel.opponent_id : duel.user_id;
   const opponent = opponentId
-    ? unwrap(await db.from("users").select("id, username, gender, profile_color").eq("id", opponentId).maybeSingle())
+    ? unwrap(await db.from("users").select("id, username, gender").eq("id", opponentId).maybeSingle())
     : null;
   return duelPayloadFromQuestions(duel, questions, viewerId, opponent);
 }
@@ -1020,10 +1028,9 @@ function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
     opponent_id: opponent?.id || (side === "user" ? duel.opponent_id : duel.user_id),
     status: duel.status,
     starts_at: duel.starts_at || duel.started_at,
-    result: resultForSide(duel.result, side),
+    result: resultForSide(resultForDuel(duel), side),
     opponent_name: opponent?.username || duel.opponent_name || "Forge Rival",
     opponent_gender: opponent?.gender || "male",
-    opponent_color: opponent?.profile_color || "#d4af37",
     opponent_score: score.theirs,
     questions,
   };
@@ -1040,7 +1047,7 @@ async function duelStatusPayload(db, duel, viewerId) {
   return {
     duelId: duel.id,
     status: duel.status,
-    result: resultForSide(duel.result, side),
+    result: resultForSide(resultForDuel(duel), side),
     mineAnswered: mine.length,
     opponentAnswered: duel.opponent_id ? theirs.length : Math.min(mine.length, DUEL_QUESTION_COUNT),
     mineScore: duel.status === "finished" ? score.mine : mine.filter((answer) => answer.is_correct).length,
@@ -1065,7 +1072,7 @@ async function createDuel(db, user, opponentId = null) {
     throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
   }
 
-  const opponent = unwrap(await db.from("users").select("id, username, gender, profile_color, last_seen_at").eq("id", opponentId).neq("id", user.id).maybeSingle());
+  const opponent = unwrap(await db.from("users").select("id, username, gender, last_seen_at").eq("id", opponentId).neq("id", user.id).maybeSingle());
   if (!opponent) throw Object.assign(new Error("Lawan tidak ditemukan."), { status: 404 });
   if (!isRecentlyOnline(opponent)) throw Object.assign(new Error("Lawan sedang offline, duel dibatalkan."), { status: 400 });
   const duelId = id("duel");
@@ -1132,7 +1139,7 @@ async function sendFinishedDuel(res, db, duel, viewerId) {
   const score = scoreForSide(duel, side);
   return send(res, 200, {
     result: {
-      result: resultForSide(duel.result, side),
+      result: resultForSide(resultForDuel(duel), side),
       fpAwarded: side === "opponent" ? Number(duel.opponent_fp_awarded || 0) : Number(duel.fp_awarded || 0),
       userScore: score.mine,
       opponentScore: score.theirs,
@@ -1163,14 +1170,12 @@ async function settleDuel(db, duel) {
 
   const updated = unwrap(await db.from("duels").update({
     status: "finished",
-    result,
     user_score: userFp,
     opponent_score: opponentFp,
     user_avg_time_ms: userAvgMs,
     opponent_avg_time_ms: opponentAvgMs,
     fp_awarded: userFp,
     opponent_fp_awarded: opponentFp,
-    settled_at: new Date().toISOString(),
     finished_at: new Date().toISOString(),
   }).eq("id", duel.id).eq("status", "active").select("id"));
   if (!updated.length) return duel;
@@ -1198,7 +1203,6 @@ async function updateUserAfterDuel(db, user, result, score, answers, fp) {
     current_win_streak: result === "win" ? Number(user.current_win_streak || 0) + 1 : 0,
     fire_streak_days: newFire.fire_streak_days,
     last_fire_date: newFire.last_fire_date,
-    first_duel_at: user.first_duel_at || new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
   }).eq("id", user.id));
   await awardBadges(db, user.id);
@@ -1215,17 +1219,17 @@ async function awardBadges(db, userId) {
   const user = unwrap(await db.from("users").select("*").eq("id", userId).single());
   const championCount = await db
     .from("weekly_rank_snapshots")
-    .select("id", { count: "exact", head: true })
+    .select("week_key", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("rank", 1);
   const secondCount = await db
     .from("weekly_rank_snapshots")
-    .select("id", { count: "exact", head: true })
+    .select("week_key", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("rank", 2);
   const thirdCount = await db
     .from("weekly_rank_snapshots")
-    .select("id", { count: "exact", head: true })
+    .select("week_key", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("rank", 3);
   const duelCount = Number(user.wins || 0) + Number(user.losses || 0) + Number(user.draws || 0);

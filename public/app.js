@@ -1025,20 +1025,25 @@ function renderBadges(data) {
   $("#badgeProgress").textContent = `${data.unlocked}/${data.total} terbuka`;
   $("#badgeGrid").innerHTML = data.badges.map((badge) => `
     <button class="badge-tile ${badge.earned_at ? "" : "locked"}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
-      <span class="badge-icon">${badge.earned_at ? badge.icon : "?"}</span>
+      <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
       <strong>${badge.name}</strong>
       <small>${badge.earned_at ? "Terbuka" : "Terkunci"}</small>
     </button>
   `).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
 }
 
+function badgeVisual(badge) {
+  const fallback = escapeHtml((badge.name || "?").trim().charAt(0).toUpperCase() || "?");
+  if (!badge.img_url) return fallback;
+  return `<img class="badge-img" src="${escapeHtml(badge.img_url)}" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='${fallback}'" />`;
+}
+
 function showBadgeDetail(button) {
   const badge = JSON.parse(button.dataset.badge.replace(/&apos;/g, "'"));
   $("#badgeDetail").innerHTML = `
-    <div class="badge-icon">${badge.earned_at ? badge.icon : "?"}</div>
+    <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
     <h3>${badge.name}</h3>
     <p>${badge.description}</p>
-    <p><strong>Syarat:</strong> ${badge.unlock_rule}</p>
     <p><strong>Status:</strong> ${badge.earned_at ? `Terbuka pada ${new Date(badge.earned_at).toLocaleDateString("id-ID")}` : "Terkunci"}</p>
   `;
 }
@@ -1085,7 +1090,7 @@ function renderSettings() {
         ["Jawaban Benar", state.me.total_correct],
         ["Rata-rata Waktu", avgTime(state.me)],
         ["Streak Menang", `${state.me.current_win_streak} menang`],
-        ["Duel Pertama", state.me.first_duel_at ? new Date(state.me.first_duel_at).toLocaleDateString("id-ID") : "-"],
+        ["Akun Dibuat", state.me.created_at ? new Date(state.me.created_at).toLocaleDateString("id-ID") : "-"],
         ["Fire Streak", `${state.me.fire_streak_days} hari`],
         ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
       ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")}

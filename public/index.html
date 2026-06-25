@@ -68,6 +68,7 @@
             <label>Username<input name="username" required minlength="3" placeholder="unique username" /></label>
           </div>
           <label>Nomor WhatsApp<input name="phone" inputmode="tel" required placeholder="+62..." /></label>
+          <label>Email Aktif<input name="email" type="email" autocomplete="email" required placeholder="nama@email.com" /></label>
           <label>Kota<input name="city" maxlength="60" required placeholder="Contoh: Manado" /></label>
           <label>Jenis Kelamin
             <input name="gender" id="registerGenderInput" type="hidden" value="male" />
@@ -97,8 +98,25 @@
         <form class="auth-panel" id="resetForm">
           <p class="eyebrow">Bantuan akun</p>
           <h1>Lupa Password</h1>
-          <p class="muted">Untuk keamanan komunitas, reset password dilakukan melalui contact person.</p>
-          <a class="btn primary full" href="https://wa.me/6281392187414">Hubungi Contact Person</a>
+          <p class="muted">Masukkan email aktif yang terdaftar. FORGE akan mengirim kode reset 6 digit.</p>
+          <label>Email Aktif<input name="email" type="email" autocomplete="email" required placeholder="nama@email.com" /></label>
+          <button class="btn primary full" type="submit">Kirim Kode Reset</button>
+          <div id="resetConfirmBlock" class="reset-confirm is-hidden">
+            <label>Kode Reset<input name="code" inputmode="numeric" maxlength="6" placeholder="6 digit" /></label>
+            <label>Password Baru
+              <span class="password-field">
+                <input name="password" type="password" minlength="8" autocomplete="new-password" />
+                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
+              </span>
+            </label>
+            <label>Konfirmasi Password Baru
+              <span class="password-field">
+                <input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" />
+                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
+              </span>
+            </label>
+            <button class="btn secondary full" type="button" id="confirmResetBtn">Ganti Password</button>
+          </div>
           <button class="link-button" type="button" data-auth-tab="login">Kembali ke login</button>
         </form>
       </article>
@@ -279,6 +297,7 @@
               <label>Nama<input name="name" id="nameInput" required /></label>
               <label>Username<input name="username" id="usernameInput" required /></label>
               <label>Nomor WhatsApp<input name="phone" id="phoneInput" inputmode="tel" required /></label>
+              <label>Email Aktif<input name="email" id="emailInput" type="email" autocomplete="email" required /></label>
               <label>Kota<input name="city" id="cityInput" maxlength="60" placeholder="Contoh: Manado" /></label>
               <label>Jenis Kelamin
                 <input name="gender" id="genderInput" type="hidden" />
@@ -293,8 +312,6 @@
               <h3>Pengaturan Akun</h3>
               <label class="switch"><span><strong>Music</strong><small>Instrument piano latar web</small></span><input name="music_enabled" type="checkbox" /></label>
               <label class="switch"><span><strong>Sound FX</strong><small>Klik, timer, benar, salah, menang, kalah</small></span><input name="sfx_enabled" type="checkbox" /></label>
-              <label class="switch"><span><strong>Status Online</strong><small>Tampilkan status aktif di member arena</small></span><input name="show_online_status" type="checkbox" /></label>
-              <label class="switch"><span><strong>Undangan Duel</strong><small>Izinkan member lain mengirim request duel</small></span><input name="allow_duel_invites" type="checkbox" /></label>
               <button class="btn primary" type="submit">Simpan Pengaturan</button>
               <button class="btn danger" type="button" id="logoutBtn">Logout</button>
               <button class="link-button danger-text" type="button" id="deleteAccountBtn">Hapus akun</button>

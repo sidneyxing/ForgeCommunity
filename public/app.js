@@ -65,6 +65,7 @@ const soundFiles = {
   tick: "/sounds/clock-tick.mp3",
   correct: "/sounds/correct.mp3",
   wrong: "/sounds/wrong.mp3",
+  notif: "/sounds/notif.mp3",
   win: "/sounds/win.mp3",
   lose: "/sounds/lose.mp3",
   background: "/sounds/idle.mp3",
@@ -118,9 +119,11 @@ function setBusy(form, busy, label = "Memproses...") {
 
 function toast(message) {
   const el = $("#toast");
+  if (!el) return;
   el.textContent = message;
   el.classList.add("show");
-  window.setTimeout(() => el.classList.remove("show"), 2800);
+  playSound("notif", { overlap: true });
+  window.setTimeout(() => el.classList.remove("show"), 3200);
 }
 
 function escapeHtml(value = "") {
@@ -245,6 +248,7 @@ function tone(name) {
     tick: 760,
     correct: 920,
     wrong: 160,
+    notif: 880,
     win: 1040,
     lose: 130,
     duelStart: 560,
@@ -515,7 +519,17 @@ function renderShell() {
   $("#duelUserAvatar").src = avatar(state.me);
   applyAvatarColor($("#duelUserAvatarWrap"), state.me);
   $("#duelUserName").textContent = state.me.username;
-  const fireIcon = $(".daily-flame-icon");
+  renderDailyFlameGif();
+}
+
+function renderDailyFlameGif() {
+  const flameCard = $(".daily-flame");
+  if (!flameCard) return;
+  let fireIcon = $(".daily-flame-icon", flameCard);
+  if (!fireIcon) {
+    flameCard.insertAdjacentHTML("afterbegin", `<img class="daily-flame-icon" src="/gif/fire.gif" alt="" loading="lazy" />`);
+    fireIcon = $(".daily-flame-icon", flameCard);
+  }
   if (fireIcon?.tagName === "IMG") {
     fireIcon.src = "/gif/fire.gif";
     fireIcon.alt = "";
@@ -741,6 +755,51 @@ function renderMemberList(members) {
   `).join("") || `<p class="muted">Belum ada member lain. Daftarkan minimal 2 akun agar Member Arena terisi.</p>`;
 }
 
+function duelRecordBoxes(wins = 0, losses = 0, draws = 0) {
+  return `
+    <span class="record-boxes" aria-label="Win ${wins}, Lose ${losses}, Draw ${draws}">
+      <span><b>${Number(wins || 0)}</b><small>Win</small></span>
+      <span><b>${Number(losses || 0)}</b><small>Lose</small></span>
+      <span><b>${Number(draws || 0)}</b><small>Draw</small></span>
+    </span>
+  `;
+}
+
+function duelResultLabel(result) {
+  const value = String(result || "").toLowerCase();
+  if (value === "win") return "WIN";
+  if (value === "lose" || value === "loss") return "LOSE";
+  return "DRAW";
+}
+
+function duelHistoryResult(duel = {}) {
+  const explicit = String(duel.result || "").toLowerCase();
+  if (["win", "lose", "draw"].includes(explicit)) return explicit;
+  const mine = Number(duel.user_score ?? duel.fp_awarded ?? 0);
+  const opponent = Number(duel.opponent_score ?? 0);
+  if (mine > opponent) return "win";
+  if (mine < opponent) return "lose";
+  return "draw";
+}
+
+function setSettingsCardOrder() {
+  const profileCard = $("#profileForm")?.closest(".settings-card");
+  const historyCard = $("#duelHistoryList")?.closest(".settings-card");
+  const accountCard = $("#settingsForm")?.closest(".settings-card");
+  const statsCard = $("#profileStats");
+  if (profileCard) profileCard.style.order = "1";
+  if (historyCard) historyCard.style.order = "2";
+  if (accountCard) accountCard.style.order = "3";
+  if (statsCard) statsCard.style.order = "4";
+}
+
+function removeUnusedSettingsToggles() {
+  const form = $("#settingsForm");
+  if (!form) return;
+  form.show_online_status?.closest(".switch")?.remove();
+  form.allow_duel_invites?.closest(".switch")?.remove();
+}
+
 function showMemberProfile(row) {
   const member = JSON.parse(row.dataset.member.replace(/&apos;/g, "'"));
   $$(".member-row").forEach((item) => item.classList.toggle("is-selected", item === row));
@@ -752,7 +811,7 @@ function showMemberProfile(row) {
     ["Lifetime FP", member.lifetime_fp.toLocaleString("id-ID")],
     ["Weekly FP", member.weekly_fp.toLocaleString("id-ID")],
     ["Duel Count", totalDuels.toLocaleString("id-ID")],
-    ["W/L/D", `${member.wins || 0}/${member.losses || 0}/${member.draws || 0}`],
+    ["Rekor Duel", duelRecordBoxes(member.wins, member.losses, member.draws)],
     ["Jawaban Benar", (member.total_correct || 0).toLocaleString("id-ID")],
     ["Avg Time", avgTime(member)],
     ["Win Streak", `${member.current_win_streak || 0} menang`],
@@ -1000,40 +1059,23 @@ function renderLeaderboard(data) {
     </article>
   `).join("") || `<p class="muted">Belum ada data peringkat.</p>`;
 
-  $("#hallOfLegends").innerHTML = `
+  const topList = (title, rows = [], valueFn = () => "-") => `
     <div class="legend-block">
-      <strong>Weekly Recap</strong>
-      <p class="muted">Recap juara: ${data.weekly?.recapAt || "Minggu 23:50 WITA"}<br>Reset weekly FP: ${data.weekly?.resetAt || "Senin 00:00 WITA"}</p>
-      ${data.weekly?.lastWinners?.length ? data.weekly.lastWinners.map((winner) => `
-        <article class="legend-person">
-          <span class="legend-medal">#${winner.rank}</span>
-          <span><b>@${winner.username}</b><small>${Number(winner.weekly_fp || 0).toLocaleString("id-ID")} FP · ${winner.week_key}</small></span>
-        </article>
-      `).join("") : `<p class="muted">Belum ada recap minggu lalu.</p>`}
-    </div>
-    <div class="legend-block">
-      <strong>Fire Streak Tertinggi</strong>
-      ${data.legends.fire.length ? data.legends.fire.map((u, index) => `
+      <strong>${title}</strong>
+      ${rows.length ? rows.map((row, index) => `
         <article class="legend-person">
           <span class="legend-medal">#${index + 1}</span>
-          <span><b>@${u.username}</b><small>${u.fire_streak_days} hari menyala</small></span>
+          <span><b>@${row.username}</b><small>${valueFn(row)}</small></span>
         </article>
-      `).join("") : `<p class="muted">Belum ada streak.</p>`}
+      `).join("") : `<p class="muted">Belum ada data.</p>`}
     </div>
-    <div class="legend-block">
-      <strong>Menang Terbanyak</strong>
-      <article class="legend-person">
-        <span class="legend-medal">W</span>
-        <span><b>@${data.legends.mostWins?.username || "-"}</b><small>${data.legends.mostWins?.wins || 0} kemenangan</small></span>
-      </article>
-    </div>
-    <div class="legend-block">
-      <strong>Ronde Tercepat</strong>
-      <article class="legend-person">
-        <span class="legend-medal">F</span>
-        <span><b>@${data.legends.fastest?.username || "-"}</b><small>${data.legends.fastest?.avg_time || "0s"} rata-rata</small></span>
-      </article>
-    </div>
+  `;
+
+  $("#hallOfLegends").innerHTML = `
+    ${topList("Top 3 Fire Streak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
+    ${topList("Top 3 Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
+    ${topList("Top 3 Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
+    ${topList("Top 3 Lifetime FP", data.legends?.lifetime || [], (row) => `${Number(row.lifetime_fp || 0).toLocaleString("id-ID")} FP`)}
   `;
 }
 
@@ -1120,24 +1162,29 @@ function renderSettings() {
   $("#nameInput").value = state.me.name;
   $("#usernameInput").value = state.me.username;
   $("#phoneInput").value = state.me.phone || "";
+  const emailInput = $("#emailInput");
+  if (emailInput) emailInput.value = state.me.email || "";
   $("#cityInput").value = state.me.city || "";
   setGenderInput(state.me.gender || "");
   const form = $("#settingsForm");
-  for (const key of ["music_enabled", "sfx_enabled", "show_online_status", "allow_duel_invites"]) {
-    form[key].checked = state.me.settings[key] !== false;
+  removeUnusedSettingsToggles();
+  for (const key of ["music_enabled", "sfx_enabled"]) {
+    if (form[key]) form[key].checked = state.me.settings[key] !== false;
   }
+  setSettingsCardOrder();
   renderDuelHistory();
   $("#profileStats").innerHTML = `
     <h3>Statistik Profil</h3>
     <div class="profile-stat-grid">
       <div class="copy-stat"><span>ID Pemain</span><strong>${state.me.given_id}</strong><button type="button" data-copy-value="${escapeHtml(state.me.given_id)}" data-copy-label="ID Pemain">Copy ID</button></div>
       <div class="copy-stat"><span>Username</span><strong>@${state.me.username}</strong><button type="button" data-copy-value="${escapeHtml(state.me.username)}" data-copy-label="Username">Copy Username</button></div>
+      <div class="copy-stat"><span>Email Aktif</span><strong>${state.me.email || "-"}</strong><button type="button" data-copy-value="${escapeHtml(state.me.email || "")}" data-copy-label="Email">Copy Email</button></div>
       ${[
         ["Kota", state.me.city || "-"],
         ["Jenis Kelamin", genderLabel(state.me.gender)],
         ["Level Pemain", levelName(state.me.lifetime_fp)],
         ["Total Poin", state.me.lifetime_fp.toLocaleString("id-ID")],
-        ["Menang / Kalah / Draw", `${state.me.wins}/${state.me.losses}/${state.me.draws}`],
+        ["Rekor Duel", duelRecordBoxes(state.me.wins, state.me.losses, state.me.draws)],
         ["Jawaban Benar", state.me.total_correct],
         ["Rata-rata Waktu", avgTime(state.me)],
         ["Streak Menang", `${state.me.current_win_streak} menang`],
@@ -1155,7 +1202,7 @@ function renderDuelHistory() {
     ? `<div class="duel-history-list">${history.map((duel) => `
       <article class="duel-history-item">
         <div>
-          <strong>${duel.result || "active"}</strong>
+          <strong>${duelResultLabel(duelHistoryResult(duel))}</strong>
           <small>vs ${duel.opponent_name} - ${new Date(duel.started_at).toLocaleString("id-ID")}</small>
         </div>
         <span>+${duel.fp_awarded || 0} FP</span>
@@ -1323,6 +1370,9 @@ async function finishDuel({ fromSync = false } = {}) {
   state.renderedResultDuelId = state.duel.id;
   const nextLifetimeFp = Number(state.me.lifetime_fp || 0) + Number(result.fpAwarded || 0);
   const nextWeeklyFp = Number(state.me.weekly_fp || 0) + Number(result.fpAwarded || 0);
+  const previousLevel = levelName(state.me.lifetime_fp);
+  const nextLevel = levelName(nextLifetimeFp);
+  const didLevelUp = previousLevel !== nextLevel;
   refreshMe().catch(() => {});
   const resultTitle = result.result === "win" ? "Menang" : result.result === "lose" ? "Kalah" : "Draw";
   const resultMessage = result.result === "win"
@@ -1360,6 +1410,10 @@ async function finishDuel({ fromSync = false } = {}) {
       event: "finish",
       payload: { duelId: state.duel.id },
     }).catch(() => {});
+  }
+  if (didLevelUp) toast(`Selamat, kamu naik ke ${nextLevel}.`);
+  for (const badge of result.newBadges || []) {
+    toast(`Selamat, kamu membuka badge baru: ${badge.name}`);
   }
   if (state.resultSoundPlayedDuelIds.has(state.duel.id)) return;
   state.resultSoundPlayedDuelIds.add(state.duel.id);
@@ -1534,6 +1588,40 @@ function bindEvents() {
     }
   });
 
+  $("#resetForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const target = event.currentTarget;
+    const body = Object.fromEntries(new FormData(target));
+    setBusy(target, true, "Mengirim kode...");
+    try {
+      await api("/api/auth/reset/request", { method: "POST", body: { email: body.email } });
+      $("#resetConfirmBlock")?.classList.remove("is-hidden");
+      toast("Kode reset sudah dikirim ke email aktif kamu.");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(target, false);
+    }
+  });
+
+  $("#confirmResetBtn")?.addEventListener("click", async () => {
+    const form = $("#resetForm");
+    const body = Object.fromEntries(new FormData(form));
+    if (body.password !== body.confirmPassword) return toast("Konfirmasi password baru tidak sama.");
+    setBusy(form, true, "Mengganti password...");
+    try {
+      await api("/api/auth/reset/confirm", { method: "POST", body });
+      form.reset();
+      $("#resetConfirmBlock")?.classList.add("is-hidden");
+      setAuthTab("login");
+      toast("Password berhasil diganti. Silakan login.");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(form, false);
+    }
+  });
+
   $("#profileForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const target = event.currentTarget;
@@ -1556,8 +1644,6 @@ function bindEvents() {
     const body = {
       music_enabled: form.music_enabled.checked,
       sfx_enabled: form.sfx_enabled.checked,
-      show_online_status: form.show_online_status.checked,
-      allow_duel_invites: form.allow_duel_invites.checked,
     };
     setBusy(form, true, "Menyimpan...");
     try {

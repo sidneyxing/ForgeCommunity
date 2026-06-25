@@ -6,6 +6,7 @@ create table if not exists public.users (
   name text not null,
   username text not null unique,
   phone text unique,
+  email text unique,
   city text not null default '',
   gender text not null default '',
   password_hash text not null,
@@ -17,6 +18,16 @@ create table if not exists public.users (
   losses integer not null default 0,
   draws integer not null default 0,
   total_correct integer not null default 0,
+  logic_correct integer not null default 0,
+  geography_correct integer not null default 0,
+  technology_correct integer not null default 0,
+  general_correct integer not null default 0,
+  health_correct integer not null default 0,
+  psychology_correct integer not null default 0,
+  character_correct integer not null default 0,
+  economy_correct integer not null default 0,
+  bible_correct integer not null default 0,
+  english_correct integer not null default 0,
   total_answer_time_ms integer not null default 0,
   total_answers integer not null default 0,
   current_win_streak integer not null default 0,
@@ -38,16 +49,20 @@ create table if not exists public.sessions (
 create unique index if not exists idx_sessions_one_active_per_user
   on public.sessions (user_id);
 
+
+create table if not exists public.password_reset_codes (
+  id text primary key,
+  user_id text not null references public.users(id) on delete cascade,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.user_settings (
   user_id text primary key references public.users(id) on delete cascade,
-  sound_enabled boolean not null default true,
   music_enabled boolean not null default true,
-  sfx_enabled boolean not null default true,
-  show_online_status boolean not null default true,
-  allow_duel_invites boolean not null default true,
-  notifications_enabled boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  sfx_enabled boolean not null default true
 );
 
 create table if not exists public.system_settings (
@@ -80,6 +95,7 @@ create table if not exists public.questions (
 
 create table if not exists public.daily_question_pool (
   pool_date date not null,
+  category_key text not null default '',
   question_id text not null references public.questions(id) on delete cascade,
   primary key (pool_date, question_id)
 );
@@ -115,6 +131,7 @@ create table if not exists public.duel_answers (
   selected_option text check (selected_option in ('A', 'B', 'C', 'D')),
   is_correct boolean not null,
   answer_time_ms integer not null default 0,
+  answered_at timestamptz not null default now(),
   primary key (duel_id, question_id, user_id)
 );
 
@@ -164,22 +181,27 @@ create table if not exists public.weekly_rank_snapshots (
 create index if not exists idx_users_weekly on public.users (weekly_fp desc, lifetime_fp desc);
 create index if not exists idx_users_seen on public.users (last_seen_at);
 create index if not exists idx_users_lower_username on public.users (lower(username));
+create unique index if not exists idx_users_lower_email on public.users (lower(email)) where email is not null and email <> '';
 create index if not exists idx_questions_active on public.questions (active, category);
 create index if not exists idx_daily_question_pool_date on public.daily_question_pool (pool_date);
+create index if not exists idx_daily_question_pool_date_category on public.daily_question_pool (pool_date, category_key);
 create index if not exists idx_duels_user_started on public.duels (user_id, started_at desc);
 create index if not exists idx_duels_opponent_started on public.duels (opponent_id, started_at desc);
 create index if not exists idx_duels_started_status on public.duels (started_at desc, status);
 create index if not exists idx_duel_answers_duel_user on public.duel_answers (duel_id, user_id);
+create index if not exists idx_duel_answers_user_answered on public.duel_answers (user_id, answered_at desc);
 create index if not exists idx_duel_queue_waiting on public.duel_queue (status, updated_at, last_seen_at);
 create index if not exists idx_duel_requests_target on public.duel_requests (target_id, status, created_at desc);
 create index if not exists idx_duel_requests_requester on public.duel_requests (requester_id, target_id, status);
 create index if not exists idx_duel_requests_expiry on public.duel_requests (status, expires_at);
+create index if not exists idx_password_reset_codes_user_expiry on public.password_reset_codes (user_id, expires_at desc);
 create index if not exists idx_weekly_rank_snapshots_user_rank on public.weekly_rank_snapshots (user_id, rank);
 create index if not exists idx_weekly_rank_snapshots_week_rank on public.weekly_rank_snapshots (week_key, rank);
 
 alter table public.users enable row level security;
 alter table public.sessions enable row level security;
 alter table public.user_settings enable row level security;
+alter table public.password_reset_codes enable row level security;
 alter table public.system_settings enable row level security;
 alter table public.relationships enable row level security;
 alter table public.questions enable row level security;

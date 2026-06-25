@@ -18,6 +18,36 @@ const SESSION_DAYS = 180;
 const SESSION_KEEP_PER_USER = 1;
 const DATA_RETENTION_DAYS = 30;
 const APP_TIME_ZONE = "Asia/Makassar";
+const DAILY_CATEGORY_QUESTION_COUNT = 5;
+const RESET_CODE_TTL_MS = 15 * 60 * 1000;
+
+const QUESTION_CATEGORIES = [
+  { key: "bible", label: "Alkitab", counter: "bible_correct", aliases: ["alkitab", "bible"] },
+  { key: "character", label: "Moral & Character", counter: "character_correct", aliases: ["moral", "character", "karakter", "refleksi", "kepemimpinan", "situational"] },
+  { key: "technology", label: "Teknologi", counter: "technology_correct", aliases: ["teknologi", "technology", "tech"] },
+  { key: "geography", label: "Geografi", counter: "geography_correct", aliases: ["geografi", "geography", "nations", "world"] },
+  { key: "logic", label: "Logika & Matematika", counter: "logic_correct", aliases: ["logika", "matematika", "logic", "math"] },
+  { key: "general", label: "Pengetahuan Umum", counter: "general_correct", aliases: ["pengetahuan umum", "general", "knowledge", "umum"] },
+  { key: "health", label: "Kesehatan", counter: "health_correct", aliases: ["kesehatan", "health", "medical", "wellness"] },
+  { key: "psychology", label: "Psikologi", counter: "psychology_correct", aliases: ["psikologi", "psychology", "komunikasi", "mind"] },
+  { key: "economy", label: "Ekonomi", counter: "economy_correct", aliases: ["ekonomi", "economy", "keuangan", "financial", "finance"] },
+  { key: "english", label: "Bahasa Inggris", counter: "english_correct", aliases: ["bahasa inggris", "english", "grammar", "vocabulary"] },
+];
+
+const CATEGORY_BY_KEY = new Map(QUESTION_CATEGORIES.map((category) => [category.key, category]));
+const CATEGORY_THRESHOLDS = [25, 50, 100, 250, 500, 750, 1000, 2500, 5000, 10000];
+const CATEGORY_BADGE_START = {
+  bible: 41,
+  character: 51,
+  technology: 61,
+  geography: 71,
+  logic: 81,
+  general: 91,
+  health: 101,
+  psychology: 111,
+  economy: 121,
+  english: 131,
+};
 let seedPromise;
 let weeklySeasonCheckedKey;
 let maintenanceLastRunAt = 0;
@@ -34,6 +64,8 @@ export default async function handler(req, res) {
     if (method === "POST" && path === "/auth/register") return register(req, res, db);
     if (method === "POST" && path === "/auth/login") return login(req, res, db);
     if (method === "POST" && path === "/auth/logout") return logout(req, res, db);
+    if (method === "POST" && path === "/auth/reset/request") return requestPasswordReset(req, res, db);
+    if (method === "POST" && path === "/auth/reset/confirm") return confirmPasswordReset(req, res, db);
 
     const user = await requireUser(req, db);
     if (method === "GET" && path === "/realtime-config") return realtimeConfig(res);
@@ -416,23 +448,109 @@ async function generateUniqueGivenId(db) {
   return String(Date.now()).slice(-7);
 }
 
+function normalizeEmail(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
+}
+
+function randomResetCode() {
+  const value = Number(`0x${randomBytes(4).toString("hex")}`) % 1000000;
+  return String(value).padStart(6, "0");
+}
+
+async function sendPasswordResetEmail(email, code) {
+  const apiKey = process.env.RESEND_API_KEY || "";
+  const from = process.env.RESET_FROM_EMAIL || "";
+  if (!apiKey || !from) {
+    throw Object.assign(new Error("Email reset belum dikonfigurasi admin."), { status: 500 });
+  }
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: email,
+      subject: "Kode Reset Password FORGE",
+      text: `Kode reset password FORGE kamu: ${code}. Kode berlaku 15 menit. Abaikan email ini kalau kamu tidak meminta reset password.`,
+      html: `<p>Kode reset password FORGE kamu:</p><h2>${code}</h2><p>Kode berlaku 15 menit.</p><p>Abaikan email ini kalau kamu tidak meminta reset password.</p>`,
+    }),
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error("Email reset gagal dikirim."), { status: 502 });
+  }
+}
+
+async function requestPasswordReset(req, res, db) {
+  const email = normalizeEmail(body(req).email);
+  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
+  const user = unwrap(await db.from("users").select("id, email").eq("email", email).maybeSingle());
+  if (!user) return send(res, 404, { error: "Email belum terdaftar di FORGE." });
+  const code = randomResetCode();
+  await db.from("password_reset_codes").delete().eq("user_id", user.id);
+  unwrap(await db.from("password_reset_codes").insert({
+    id: id("reset"),
+    user_id: user.id,
+    code_hash: await digest(code),
+    expires_at: new Date(Date.now() + RESET_CODE_TTL_MS).toISOString(),
+  }));
+  await sendPasswordResetEmail(email, code);
+  return send(res, 200, { ok: true, message: "Kode reset sudah dikirim ke email aktif kamu." });
+}
+
+async function confirmPasswordReset(req, res, db) {
+  const data = body(req);
+  const email = normalizeEmail(data.email);
+  const code = String(data.code || "").trim();
+  const password = String(data.password || "");
+  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
+  if (!/^\d{6}$/.test(code)) return send(res, 400, { error: "Kode reset harus 6 digit." });
+  if (password.length < 8) return send(res, 400, { error: "Password baru minimal 8 karakter." });
+  const user = unwrap(await db.from("users").select("id").eq("email", email).maybeSingle());
+  if (!user) return send(res, 404, { error: "Email belum terdaftar di FORGE." });
+  const reset = unwrap(await db
+    .from("password_reset_codes")
+    .select("id, code_hash, expires_at, used_at")
+    .eq("user_id", user.id)
+    .is("used_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle());
+  if (!reset || new Date(reset.expires_at).getTime() <= Date.now()) {
+    return send(res, 400, { error: "Kode reset sudah expired. Silakan kirim kode baru." });
+  }
+  if (reset.code_hash !== await digest(code)) return send(res, 400, { error: "Kode reset salah." });
+  unwrap(await db.from("users").update({ password_hash: hashPassword(password) }).eq("id", user.id));
+  unwrap(await db.from("password_reset_codes").update({ used_at: new Date().toISOString() }).eq("id", reset.id));
+  await db.from("sessions").delete().eq("user_id", user.id);
+  return send(res, 200, { ok: true, message: "Password berhasil diganti. Silakan login dengan password baru." });
+}
+
 async function register(req, res, db) {
   const data = body(req);
   const name = String(data.name || "").trim();
   const username = String(data.username || "").trim().toLowerCase();
   const phone = String(data.phone || "").trim();
+  const email = normalizeEmail(data.email);
   const password = String(data.password || "");
   const city = String(data.city || "").trim();
   const gender = ["male", "female"].includes(data.gender) ? data.gender : "male";
   if (name.length < 2) return send(res, 400, { error: "Nama minimal 2 karakter." });
   if (!/^[a-z0-9_]{3,24}$/.test(username)) return send(res, 400, { error: "Username harus 3-24 karakter: huruf, angka, underscore." });
   if (!/^\+?[0-9][0-9\s-]{7,18}$/.test(phone)) return send(res, 400, { error: "Nomor WhatsApp tidak valid." });
+  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
   if (password.length < 8) return send(res, 400, { error: "Password minimal 8 karakter." });
   if (city.length < 2 || city.length > 60) return send(res, 400, { error: "Kota wajib diisi, maksimal 60 karakter." });
 
   const existingUsername = unwrap(await db.from("users").select("id").eq("username", username).maybeSingle());
   const existingPhone = unwrap(await db.from("users").select("id").eq("phone", phone).maybeSingle());
-  if (existingUsername || existingPhone) return send(res, 400, { error: "Username atau nomor WhatsApp sudah dipakai." });
+  const existingEmail = unwrap(await db.from("users").select("id").eq("email", email).maybeSingle());
+  if (existingUsername || existingPhone || existingEmail) return send(res, 400, { error: "Username, nomor WhatsApp, atau email sudah dipakai." });
 
   const userId = id("user");
   unwrap(await db.from("users").insert({
@@ -441,6 +559,7 @@ async function register(req, res, db) {
     name,
     username,
     phone,
+    email,
     city,
     gender,
     password_hash: hashPassword(password),
@@ -511,7 +630,7 @@ async function mePayload(db, user) {
   const duelsToday = await duelsTodayCount(db, user.id);
   const duelRows = unwrap(await db
     .from("duels")
-    .select("id, user_id, opponent_id, opponent_name, user_score, opponent_score, fp_awarded, opponent_fp_awarded, started_at, finished_at")
+    .select("id, status, user_id, opponent_id, opponent_name, user_score, opponent_score, fp_awarded, opponent_fp_awarded, started_at, finished_at")
     .or(`user_id.eq.${user.id},opponent_id.eq.${user.id}`)
     .eq("status", "finished")
     .order("started_at", { ascending: false })
@@ -570,6 +689,7 @@ async function runStorageMaintenance(db, userId = null) {
   maintenanceLastRunAt = now;
   await Promise.all([
     cleanupExpiredSessions(db),
+    cleanupExpiredPasswordResetCodes(db),
     cleanupExpiredDuelRequests(db),
     cleanupDuelRequestHistory(db),
     cleanupMatchQueue(db),
@@ -579,6 +699,11 @@ async function runStorageMaintenance(db, userId = null) {
 
 async function cleanupExpiredSessions(db) {
   await db.from("sessions").delete().lt("expires_at", new Date().toISOString());
+}
+
+async function cleanupExpiredPasswordResetCodes(db) {
+  await db.from("password_reset_codes").delete().lt("expires_at", new Date().toISOString());
+  await db.from("password_reset_codes").delete().not("used_at", "is", null).lt("used_at", new Date(Date.now() - ONE_DAY_MS).toISOString());
 }
 
 async function trimUserSessions(db, userId) {
@@ -617,31 +742,32 @@ async function updateProfile(req, res, db, user) {
   const name = String(data.name || "").trim();
   const username = String(data.username || "").trim().toLowerCase();
   const phone = String(data.phone || "").trim();
+  const email = normalizeEmail(data.email);
   const city = String(data.city || "").trim();
   const gender = ["male", "female"].includes(data.gender) ? data.gender : "";
   if (name.length < 2) return send(res, 400, { error: "Nama minimal 2 karakter." });
   if (!/^[a-z0-9_]{3,24}$/.test(username)) return send(res, 400, { error: "Username harus 3-24 karakter." });
   if (!/^\+?[0-9][0-9\s-]{7,18}$/.test(phone)) return send(res, 400, { error: "Nomor WhatsApp tidak valid." });
+  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
   if (city.length > 60) return send(res, 400, { error: "Nama kota maksimal 60 karakter." });
   const usernameExists = unwrap(await db.from("users").select("id").eq("username", username).neq("id", user.id).maybeSingle());
   if (usernameExists) return send(res, 400, { error: "Username sudah dipakai." });
   const phoneExists = unwrap(await db.from("users").select("id").eq("phone", phone).neq("id", user.id).maybeSingle());
   if (phoneExists) return send(res, 400, { error: "Nomor WhatsApp sudah dipakai." });
-  unwrap(await db.from("users").update({ name, username, phone, city, gender }).eq("id", user.id));
+  const emailExists = unwrap(await db.from("users").select("id").eq("email", email).neq("id", user.id).maybeSingle());
+  if (emailExists) return send(res, 400, { error: "Email sudah dipakai." });
+  unwrap(await db.from("users").update({ name, username, phone, email, city, gender }).eq("id", user.id));
   return send(res, 200, { ok: true });
 }
 
 async function updateSettings(req, res, db, user) {
   const data = body(req);
-  const musicEnabled = data.music_enabled === undefined ? Boolean(data.sound_enabled) : Boolean(data.music_enabled);
-  const sfxEnabled = data.sfx_enabled === undefined ? Boolean(data.sound_enabled) : Boolean(data.sfx_enabled);
+  const musicEnabled = data.music_enabled === undefined ? true : Boolean(data.music_enabled);
+  const sfxEnabled = data.sfx_enabled === undefined ? true : Boolean(data.sfx_enabled);
   unwrap(await db.from("user_settings").upsert({
     user_id: user.id,
-    sound_enabled: musicEnabled || sfxEnabled,
     music_enabled: musicEnabled,
     sfx_enabled: sfxEnabled,
-    show_online_status: Boolean(data.show_online_status),
-    allow_duel_invites: Boolean(data.allow_duel_invites),
   }, { onConflict: "user_id" }));
   return send(res, 200, { ok: true });
 }
@@ -696,8 +822,6 @@ async function inviteDuelRequest(res, db, user, targetId) {
   if (!isRecentlyOnline(target)) return send(res, 400, { error: "Member sedang offline, tidak bisa di-invite duel." });
   const opponentTodayCount = await duelsTodayCount(db, targetId);
   if (opponentTodayCount >= DAILY_DUEL_LIMIT) return send(res, 429, { error: `Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT}/${DAILY_DUEL_LIMIT} hari ini.` });
-  const settings = await settingsFor(db, targetId);
-  if (!settings.allow_duel_invites) return send(res, 400, { error: "Member ini menutup undangan duel." });
   const expiresAt = new Date(Date.now() + DUEL_REQUEST_WAIT_MS).toISOString();
   const existing = unwrap(await db.from("duel_requests").select("id, expires_at").eq("requester_id", user.id).eq("target_id", targetId).eq("status", "pending").maybeSingle());
   const request = existing
@@ -786,9 +910,14 @@ async function cleanupExpiredDuelRequests(db) {
 async function leaderboard(res, db) {
   const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
   const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
-  const fire = [...rows].sort((a, b) => b.fire_streak_days - a.fire_streak_days).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
-  const mostWins = [...rows].sort((a, b) => b.wins - a.wins)[0] || null;
-  const fastest = rows.filter((row) => row.total_answers).sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))[0] || null;
+  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
+  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
+  const fastest = rows
+    .filter((row) => row.total_answers)
+    .sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))
+    .slice(0, 3)
+    .map((row) => ({ username: row.username, avg_time: `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` }));
+  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
   const latestSnapshot = unwrap(await db
     .from("weekly_rank_snapshots")
     .select("week_key")
@@ -810,11 +939,7 @@ async function leaderboard(res, db) {
   const snapshotByUser = new Map(snapshotUsers.map((user) => [user.id, user]));
   return send(res, 200, {
     rows: ranked,
-    legends: {
-      fire,
-      mostWins,
-      fastest: fastest ? { username: fastest.username, avg_time: `${(fastest.total_answer_time_ms / fastest.total_answers / 1000).toFixed(1)}s` } : null,
-    },
+    legends: { fire, mostWins, fastest, lifetime },
     weekly: {
       currentWeek: weekKey(),
       recapAt: "Minggu 23:50 WITA",
@@ -938,47 +1063,48 @@ async function duelStatus(res, db, user, duelId) {
 
 async function ensureDailyQuestionPool(db, force = false) {
   const poolDate = todayDate();
-  const activeQuestionCount = await db
-    .from("questions")
-    .select("id", { count: "exact", head: true })
-    .eq("active", true);
-  const targetPoolSize = Math.min(DAILY_QUESTION_POOL_SIZE, activeQuestionCount.count || 0);
-
-  if (targetPoolSize < DUEL_QUESTION_COUNT) {
-    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
-  }
+  await db.from("daily_question_pool").delete().neq("pool_date", poolDate);
 
   const existing = await db
     .from("daily_question_pool")
     .select("question_id", { count: "exact", head: true })
     .eq("pool_date", poolDate);
 
+  const targetPoolSize = QUESTION_CATEGORIES.length * DAILY_CATEGORY_QUESTION_COUNT;
   if (!force && (existing.count || 0) >= targetPoolSize) return;
-
-  const allQuestions = unwrap(await db.from("questions").select("id").eq("active", true));
 
   unwrap(await db.from("daily_question_pool").delete().eq("pool_date", poolDate));
 
-  const since = daysAgoDate(QUESTION_ROLLING_WINDOW_DAYS);
-  const usedRows = unwrap(await db
-    .from("daily_question_pool")
-    .select("question_id")
-    .gte("pool_date", since)
-    .lt("pool_date", poolDate));
+  const activeQuestions = unwrap(await db
+    .from("questions")
+    .select("id, category")
+    .eq("active", true)
+    .limit(5000));
 
-  const usedIds = new Set(usedRows.map((row) => row.question_id));
-  const unusedQuestions = allQuestions.filter((question) => !usedIds.has(question.id));
-  const poolSource = unusedQuestions.length >= targetPoolSize
-    ? unusedQuestions
-    : allQuestions;
-  const selectedPool = shuffle(poolSource).slice(0, targetPoolSize);
+  const grouped = new Map(QUESTION_CATEGORIES.map((category) => [category.key, []]));
+  for (const question of activeQuestions) {
+    const key = categoryKeyFor(question.category);
+    if (key && grouped.has(key)) grouped.get(key).push(question);
+  }
 
-  unwrap(await db.from("daily_question_pool").upsert(selectedPool.map((question) => ({
-    pool_date: poolDate,
-    question_id: question.id,
-  })), { onConflict: "pool_date,question_id" }));
+  const missing = QUESTION_CATEGORIES
+    .filter((category) => (grouped.get(category.key)?.length || 0) < DAILY_CATEGORY_QUESTION_COUNT)
+    .map((category) => `${category.label} (${grouped.get(category.key)?.length || 0}/${DAILY_CATEGORY_QUESTION_COUNT})`);
+  if (missing.length) {
+    throw Object.assign(new Error(`Stok soal aktif kurang. Minimal ${DAILY_CATEGORY_QUESTION_COUNT} soal aktif per kategori: ${missing.join(", ")}.`), { status: 500 });
+  }
 
-  await db.from("daily_question_pool").delete().lt("pool_date", daysAgoDate(QUESTION_POOL_RETENTION_DAYS));
+  const selected = QUESTION_CATEGORIES.flatMap((category) => (
+    shuffle(grouped.get(category.key)).slice(0, DAILY_CATEGORY_QUESTION_COUNT).map((question) => ({
+      pool_date: poolDate,
+      category_key: category.key,
+      question_id: question.id,
+    }))
+  ));
+
+  unwrap(await db.from("daily_question_pool").insert(selected));
+  const selectedIds = selected.map((row) => row.question_id);
+  unwrap(await db.from("questions").update({ active: false }).in("id", selectedIds).select("id"));
 }
 
 async function dailyDuelQuestions(db) {
@@ -1113,6 +1239,7 @@ async function answerDuel(req, res, db, user) {
     selected_option: selected,
     is_correct: isCorrect,
     answer_time_ms: Math.max(0, Math.min(QUESTION_TIME_LIMIT_MS, Number(data.answerTimeMs || QUESTION_TIME_LIMIT_MS))),
+    answered_at: new Date().toISOString(),
   }, { onConflict: "duel_id,question_id,user_id" }));
   const refreshed = unwrap(await db.from("duels").select("*").eq("id", data.duelId).single());
   return send(res, 200, { isCorrect, status: await duelStatusPayload(db, refreshed, user.id) });
@@ -1122,7 +1249,7 @@ async function finishDuel(req, res, db, user) {
   const data = body(req);
   let duel = unwrap(await db.from("duels").select("*").eq("id", data.duelId).maybeSingle());
   if (!duel || !isDuelParticipant(duel, user.id)) return send(res, 404, { error: "Duel tidak aktif." });
-  if (duel.status === "finished") return sendFinishedDuel(res, db, duel, user.id);
+  if (duel.status === "finished") return sendFinishedDuel(res, db, duel, user.id, []);
   const answers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", data.duelId).eq("user_id", user.id));
   const pastDeadline = Date.now() >= duelAnswerDeadlineMs(duel);
   if (answers.length < DUEL_QUESTION_COUNT && !pastDeadline) return send(res, 400, { error: "Jawab semua pertanyaan dulu." });
@@ -1136,12 +1263,12 @@ async function finishDuel(req, res, db, user) {
       }
     }
   }
-  await settleDuel(db, duel);
+  const newBadgesByUserId = await settleDuel(db, duel);
   duel = unwrap(await db.from("duels").select("*").eq("id", data.duelId).single());
-  return sendFinishedDuel(res, db, duel, user.id);
+  return sendFinishedDuel(res, db, duel, user.id, newBadgesByUserId[user.id] || []);
 }
 
-async function sendFinishedDuel(res, db, duel, viewerId) {
+async function sendFinishedDuel(res, db, duel, viewerId, newBadges = []) {
   const side = participantSide(duel, viewerId);
   const score = scoreForSide(duel, side);
   return send(res, 200, {
@@ -1151,13 +1278,14 @@ async function sendFinishedDuel(res, db, duel, viewerId) {
       userScore: score.mine,
       opponentScore: score.theirs,
       avgTimeMs: side === "opponent" ? Number(duel.opponent_avg_time_ms || 0) : Number(duel.user_avg_time_ms || 0),
+      newBadges,
     },
     status: await duelStatusPayload(db, duel, viewerId),
   });
 }
 
 async function settleDuel(db, duel) {
-  if (duel.status === "finished") return duel;
+  if (duel.status === "finished") return {};
   const allAnswers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", duel.id));
   const userAnswers = allAnswers.filter((answer) => answer.user_id === duel.user_id);
   const opponentAnswers = duel.opponent_id
@@ -1185,20 +1313,23 @@ async function settleDuel(db, duel) {
     opponent_fp_awarded: opponentFp,
     finished_at: new Date().toISOString(),
   }).eq("id", duel.id).eq("status", "active").select("id"));
-  if (!updated.length) return duel;
+  if (!updated.length) return {};
 
+  const newBadgesByUserId = {};
   const user = unwrap(await db.from("users").select("*").eq("id", duel.user_id).single());
-  await updateUserAfterDuel(db, user, result, userCorrect, userAnswers, userFp);
+  newBadgesByUserId[user.id] = await updateUserAfterDuel(db, user, result, userCorrect, userAnswers, userFp);
   if (duel.opponent_id) {
     const opponent = unwrap(await db.from("users").select("*").eq("id", duel.opponent_id).single());
-    await updateUserAfterDuel(db, opponent, resultForSide(result, "opponent"), opponentCorrect, opponentAnswers, opponentFp);
+    newBadgesByUserId[opponent.id] = await updateUserAfterDuel(db, opponent, resultForSide(result, "opponent"), opponentCorrect, opponentAnswers, opponentFp);
   }
+  return newBadgesByUserId;
 }
 
 async function updateUserAfterDuel(db, user, result, score, answers, fp) {
   const totalTime = answers.reduce((sum, answer) => sum + Number(answer.answer_time_ms || 0), 0);
   const newFire = nextFireStreak(user);
-  unwrap(await db.from("users").update({
+  const categoryIncrements = await categoryCorrectIncrements(db, answers);
+  const updatePayload = {
     lifetime_fp: Number(user.lifetime_fp || 0) + fp,
     weekly_fp: Number(user.weekly_fp || 0) + fp,
     wins: Number(user.wins || 0) + (result === "win" ? 1 : 0),
@@ -1211,8 +1342,12 @@ async function updateUserAfterDuel(db, user, result, score, answers, fp) {
     fire_streak_days: newFire.fire_streak_days,
     last_fire_date: newFire.last_fire_date,
     last_seen_at: new Date().toISOString(),
-  }).eq("id", user.id));
-  await awardBadges(db, user.id);
+  };
+  for (const [counter, value] of Object.entries(categoryIncrements)) {
+    updatePayload[counter] = Number(user[counter] || 0) + value;
+  }
+  unwrap(await db.from("users").update(updatePayload).eq("id", user.id));
+  return awardBadges(db, user.id);
 }
 
 function nextFireStreak(user) {
@@ -1222,8 +1357,49 @@ function nextFireStreak(user) {
   return { fire_streak_days: 1, last_fire_date: today };
 }
 
+function normalizeCategory(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function categoryKeyFor(value = "") {
+  const normalized = normalizeCategory(value);
+  if (!normalized) return "";
+  for (const category of QUESTION_CATEGORIES) {
+    if (category.aliases.some((alias) => normalized.includes(normalizeCategory(alias)))) return category.key;
+  }
+  return "";
+}
+
+async function categoryCorrectIncrements(db, answers = []) {
+  const correctAnswers = answers.filter((answer) => answer.is_correct);
+  const questionIds = [...new Set(correctAnswers.map((answer) => answer.question_id).filter(Boolean))];
+  if (!questionIds.length) return {};
+  const questions = unwrap(await db.from("questions").select("id, category").in("id", questionIds));
+  const questionById = new Map(questions.map((question) => [question.id, question]));
+  const increments = {};
+  for (const answer of correctAnswers) {
+    const categoryKey = categoryKeyFor(questionById.get(answer.question_id)?.category || "");
+    const counter = CATEGORY_BY_KEY.get(categoryKey)?.counter;
+    if (counter) increments[counter] = Number(increments[counter] || 0) + 1;
+  }
+  return increments;
+}
+
+function levelFromPoints(points) {
+  return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
+}
+
 async function awardBadges(db, userId) {
   const user = unwrap(await db.from("users").select("*").eq("id", userId).single());
+  const existingRows = unwrap(await db.from("user_badges").select("badge_id").eq("user_id", userId));
+  const existingIds = new Set(existingRows.map((row) => row.badge_id));
+  const awards = new Set();
   const championCount = await db
     .from("weekly_rank_snapshots")
     .select("week_key", { count: "exact", head: true })
@@ -1239,30 +1415,124 @@ async function awardBadges(db, userId) {
     .select("week_key", { count: "exact", head: true })
     .eq("user_id", userId)
     .eq("rank", 3);
+
   const duelCount = Number(user.wins || 0) + Number(user.losses || 0) + Number(user.draws || 0);
-  const awards = [];
-  if ((championCount.count || 0) >= 1) awards.push("weekly_winner");
-  if ((secondCount.count || 0) >= 1) awards.push("weekly_second");
-  if ((thirdCount.count || 0) >= 1) awards.push("weekly_third");
-  for (const value of [5, 10, 25, 50, 100]) {
-    if ((championCount.count || 0) >= value) awards.push(`weekly_champion_${value}`);
+  const duelThresholds = [1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
+  duelThresholds.forEach((value, index) => { if (duelCount >= value) awards.add(`b_${index + 1}`); });
+  duelThresholds.forEach((value, index) => { if (Number(user.wins || 0) >= value) awards.add(`b_${index + 11}`); });
+
+  const winStreakThresholds = [3, 5, 7, 10, 15, 20, 30, 50, 75, 100];
+  winStreakThresholds.forEach((value, index) => { if (Number(user.current_win_streak || 0) >= value) awards.add(`b_${index + 21}`); });
+
+  const fpThresholds = [500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000];
+  fpThresholds.forEach((value, index) => { if (Number(user.lifetime_fp || 0) >= value) awards.add(`b_${index + 31}`); });
+
+  for (const category of QUESTION_CATEGORIES) {
+    const start = CATEGORY_BADGE_START[category.key];
+    if (!start) continue;
+    CATEGORY_THRESHOLDS.forEach((value, index) => {
+      if (Number(user[category.counter] || 0) >= value) awards.add(`b_${start + index}`);
+    });
   }
-  if (duelCount >= 1) awards.push("first_duel");
-  if (user.wins >= 1) awards.push("first_win");
-  for (const value of [5, 10, 25, 50, 100, 250, 500, 1000]) {
-    if (user.wins >= value) awards.push(`win_${value}`);
-    if (duelCount >= value) awards.push(`duel_${value}`);
+
+  if (await hasFlawlessRound(db, userId)) awards.add("b_141");
+  if (await todayFastCorrectCount(db, userId) >= 7) awards.add("b_142");
+  if (await hasClutchVictory(db, userId)) awards.add("b_143");
+  if (await todayCorrectCount(db, userId) >= 35) awards.add("b_144");
+  if (await currentWeeklyRank(db, userId) <= 10) awards.add("b_145");
+  if ((thirdCount.count || 0) >= 1) awards.add("b_146");
+  if ((secondCount.count || 0) >= 1) awards.add("b_147");
+  if ((championCount.count || 0) >= 1) awards.add("b_148");
+  if (await hasFiveConsecutiveC(db, userId)) awards.add("b_149");
+  if (levelFromPoints(user.lifetime_fp) >= 100) awards.add("b_150");
+
+  const newBadgeIds = [...awards].filter((badgeId) => !existingIds.has(badgeId));
+  if (!newBadgeIds.length) return [];
+  unwrap(await db.from("user_badges").upsert(newBadgeIds.map((badgeId) => ({ user_id: userId, badge_id: badgeId })), { onConflict: "user_id,badge_id" }));
+  const badgeRows = unwrap(await db.from("badges").select("id, name, description, img_url").in("id", newBadgeIds));
+  const byId = new Map(badgeRows.map((badge) => [badge.id, badge]));
+  return newBadgeIds.map((badgeId) => byId.get(badgeId)).filter(Boolean);
+}
+
+async function todayCorrectCount(db, userId) {
+  const result = await db
+    .from("duel_answers")
+    .select("duel_id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("is_correct", true)
+    .gte("answered_at", startOfTodayIso());
+  if (result.error) throw result.error;
+  return result.count || 0;
+}
+
+async function todayFastCorrectCount(db, userId) {
+  const result = await db
+    .from("duel_answers")
+    .select("duel_id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("is_correct", true)
+    .lt("answer_time_ms", 5000)
+    .gte("answered_at", startOfTodayIso());
+  if (result.error) throw result.error;
+  return result.count || 0;
+}
+
+async function hasFlawlessRound(db, userId) {
+  const rows = unwrap(await db
+    .from("duel_answers")
+    .select("duel_id, is_correct, answered_at")
+    .eq("user_id", userId)
+    .order("answered_at", { ascending: false })
+    .limit(5000));
+  const byDuel = new Map();
+  for (const row of rows) {
+    const stats = byDuel.get(row.duel_id) || { total: 0, correct: 0 };
+    stats.total += 1;
+    if (row.is_correct) stats.correct += 1;
+    byDuel.set(row.duel_id, stats);
   }
-  for (const value of [25, 50, 100, 250, 500, 1000, 2500, 5000]) {
-    if (user.total_correct >= value) awards.push(`correct_${value}`);
+  return [...byDuel.values()].some((stats) => stats.total >= DUEL_QUESTION_COUNT && stats.correct >= DUEL_QUESTION_COUNT);
+}
+
+async function hasClutchVictory(db, userId) {
+  const rows = unwrap(await db
+    .from("duels")
+    .select("user_id, opponent_id, user_score, opponent_score, fp_awarded, opponent_fp_awarded, status, started_at")
+    .or(`user_id.eq.${userId},opponent_id.eq.${userId}`)
+    .eq("status", "finished")
+    .order("started_at", { ascending: false })
+    .limit(5000));
+  return rows.some((duel) => {
+    const side = participantSide(duel, userId);
+    const mine = side === "opponent" ? Number(duel.opponent_fp_awarded || duel.opponent_score || 0) : Number(duel.fp_awarded || duel.user_score || 0);
+    const theirs = side === "opponent" ? Number(duel.fp_awarded || duel.user_score || 0) : Number(duel.opponent_fp_awarded || duel.opponent_score || 0);
+    return mine > theirs && mine - theirs === 1;
+  });
+}
+
+async function hasFiveConsecutiveC(db, userId) {
+  const rows = unwrap(await db
+    .from("duel_answers")
+    .select("selected_option, answered_at")
+    .eq("user_id", userId)
+    .order("answered_at", { ascending: true })
+    .limit(5000));
+  let streak = 0;
+  for (const row of rows) {
+    streak = row.selected_option === "C" ? streak + 1 : 0;
+    if (streak >= 5) return true;
   }
-  for (const value of [100, 500, 1000, 2500, 5000, 10000, 25000, 50000]) {
-    if (user.lifetime_fp >= value) awards.push(`fp_${value}`);
-  }
-  for (const value of [3, 7, 14, 30, 60, 100, 180, 365]) {
-    if (user.fire_streak_days >= value) awards.push(`streak_${value}`);
-  }
-  if (awards.length) {
-    unwrap(await db.from("user_badges").upsert(awards.map((badgeId) => ({ user_id: userId, badge_id: badgeId })), { onConflict: "user_id,badge_id" }));
-  }
+  return false;
+}
+
+async function currentWeeklyRank(db, userId) {
+  const rows = unwrap(await db
+    .from("users")
+    .select("id, weekly_fp, lifetime_fp, created_at")
+    .order("weekly_fp", { ascending: false })
+    .order("lifetime_fp", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(10));
+  const index = rows.findIndex((row) => row.id === userId);
+  return index >= 0 ? index + 1 : Number.POSITIVE_INFINITY;
 }

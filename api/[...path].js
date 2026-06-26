@@ -994,6 +994,9 @@ async function joinMatchmaking(db, user) {
     if (message.includes("QUESTION_POOL_NOT_READY")) {
       throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
     }
+    if (isMatchmakingRpcUnavailable(rpcResult.error)) {
+      return joinMatchmakingFallback(db, user);
+    }
     throw rpcResult.error;
   }
   const result = rpcResult.data;
@@ -1009,6 +1012,73 @@ async function joinMatchmaking(db, user) {
 
   const duel = unwrap(await db.from("duels").select("*").eq("id", match.duel_id).single());
   return { duel: await duelPayload(db, duel, user.id) };
+}
+
+function isMatchmakingRpcUnavailable(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const code = String(error?.code || "");
+  return code === "PGRST202"
+    || message.includes("match_duel_queue")
+    || message.includes("could not find the function")
+    || details.includes("match_duel_queue");
+}
+
+async function joinMatchmakingFallback(db, user) {
+  await cleanupMatchQueue(db);
+  const todayCount = await duelsTodayCount(db, user.id);
+  if (todayCount >= DAILY_DUEL_LIMIT) {
+    throw Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
+  }
+
+  unwrap(await db.from("users").update({ last_seen_at: new Date().toISOString() }).eq("id", user.id));
+
+  const existingQueue = unwrap(await db
+    .from("duel_queue")
+    .select("status, duel_id")
+    .eq("user_id", user.id)
+    .maybeSingle());
+  if (existingQueue?.status === "matched" && existingQueue.duel_id) {
+    const duel = unwrap(await db.from("duels").select("*").eq("id", existingQueue.duel_id).maybeSingle());
+    if (duel && isDuelParticipant(duel, user.id) && duel.status === "active") {
+      return { duel: await duelPayload(db, duel, user.id) };
+    }
+  }
+
+  unwrap(await db.from("duel_queue").upsert({
+    user_id: user.id,
+    status: "waiting",
+    duel_id: null,
+    last_seen_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" }).select("user_id").single());
+
+  const opponentQueue = unwrap(await db
+    .from("duel_queue")
+    .select("user_id, updated_at")
+    .eq("status", "waiting")
+    .neq("user_id", user.id)
+    .gt("last_seen_at", new Date(Date.now() - MATCH_QUEUE_STALE_MS).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(1)
+    .maybeSingle());
+
+  if (!opponentQueue) {
+    return {
+      waiting: true,
+      message: "Menunggu lawan online. Jangan tutup halaman ini.",
+      queue: { staleInMs: MATCH_QUEUE_STALE_MS },
+    };
+  }
+
+  const duel = await createDuel(db, user, opponentQueue.user_id);
+  unwrap(await db.from("duel_queue").update({
+    status: "matched",
+    duel_id: duel.id,
+    updated_at: new Date().toISOString(),
+    last_seen_at: new Date().toISOString(),
+  }).in("user_id", [user.id, opponentQueue.user_id]).select("user_id"));
+  return { duel };
 }
 
 async function matchmakingStatus(res, db, user) {

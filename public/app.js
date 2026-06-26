@@ -576,7 +576,7 @@ function renderShell() {
   }
   $("#pillAvatar").src = avatar(state.me);
   applyAvatarColor($("#pillAvatarWrap"), state.me);
-  $("#sideFire").textContent = `${state.me.fire_streak_days} hari`;
+  $("#sideFire").innerHTML = `<span class="flame-days-count">${Number(state.me.fire_streak_days || 0).toLocaleString("id-ID")}</span><span class="flame-days-label">hari</span>`;
   $("#homeAvatar").src = avatar(state.me);
   applyAvatarColor($("#homeAvatarWrap"), state.me);
   $("#duelUserAvatar").src = avatar(state.me);
@@ -1253,10 +1253,7 @@ function renderSettings() {
     <div class="profile-stat-grid">
       <div class="copy-stat"><span>ID Pemain</span><strong>${state.me.given_id}</strong><button type="button" data-copy-value="${escapeHtml(state.me.given_id)}" data-copy-label="ID Pemain">Copy ID</button></div>
       <div class="copy-stat"><span>Username</span><strong>@${state.me.username}</strong><button type="button" data-copy-value="${escapeHtml(state.me.username)}" data-copy-label="Username">Copy Username</button></div>
-      <div class="copy-stat"><span>Email Aktif</span><strong>${state.me.email || "-"}</strong><button type="button" data-copy-value="${escapeHtml(state.me.email || "")}" data-copy-label="Email">Copy Email</button></div>
       ${[
-        ["Kota", state.me.city || "-"],
-        ["Jenis Kelamin", genderLabel(state.me.gender)],
         ["Level Pemain", levelName(state.me.lifetime_fp)],
         ["Total Poin", fpDisplay(state.me.lifetime_fp)],
         ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],

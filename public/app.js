@@ -255,9 +255,19 @@ function tone(name) {
   const ctx = state.audioContext;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
+  if (name === "tick") {
+    osc.frequency.value = 1250;
+    osc.type = "square";
+    gain.gain.setValueAtTime(0.018, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.035);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.04);
+    return;
+  }
   const frequency = {
     button: 420,
-    tick: 760,
     correct: 920,
     wrong: 160,
     notif: 880,
@@ -1383,12 +1393,13 @@ function renderQuestion() {
 }
 
 function tickQuestion() {
+  if (state.answerLocked) return;
   state.remaining -= 1;
   $("#timerValue").textContent = String(Math.max(0, state.remaining));
   $(".timer-ring").style.setProperty("--progress", `${Math.max(0, state.remaining * 10)}%`);
   playSound("tick");
   if (state.remaining <= 0) {
-    answerQuestion(null);
+    answerQuestion("__timeout__").catch((err) => toast(err.message));
   }
 }
 
@@ -1398,18 +1409,19 @@ async function answerQuestion(option) {
   clearInterval(state.duelTimer);
   const question = state.duel.questions[state.duelIndex];
   const timeMs = Math.min(10000, Math.round(performance.now() - state.questionStartedAt));
-  const isCorrect = option === question.correct_option;
+  const selectedOption = ["A", "B", "C", "D"].includes(option) ? option : null;
+  const isCorrect = selectedOption === question.correct_option;
   state.duelUserAnswers[state.duelIndex] = isCorrect;
   renderDuelProgress();
   $$(".answer-btn").forEach((btn) => {
     btn.disabled = true;
     if (btn.dataset.option === question.correct_option) btn.classList.add("correct");
-    if (option && btn.dataset.option === option && !isCorrect) btn.classList.add("wrong");
+    if (selectedOption && btn.dataset.option === selectedOption && !isCorrect) btn.classList.add("wrong");
   });
   playSound(isCorrect ? "correct" : "wrong");
   state.duelAnswerSaves.push(api("/api/duel/answer", {
     method: "POST",
-    body: { duelId: state.duel.id, questionId: question.id, selectedOption: option, answerTimeMs: timeMs },
+    body: { duelId: state.duel.id, questionId: question.id, selectedOption, answerTimeMs: timeMs },
   }));
   state.duelChannel?.send({
     type: "broadcast",

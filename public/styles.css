@@ -2776,3 +2776,90 @@ select:focus {
     width: min(210px, 42vw);
   }
 }
+
+/* Final FORGE UI fixes: keep FP inline, style home actions, tighten profile pill. */
+.stat-card strong,
+.profile-stat-grid strong,
+.duel-result-card strong {
+  align-items: center !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0.24rem;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.stat-card .fp-chip,
+.profile-stat-grid .fp-chip,
+.duel-result-card .fp-chip,
+.profile-pill .fp-chip {
+  align-items: center !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 0.24rem;
+  justify-content: flex-start !important;
+  min-width: 0 !important;
+  width: auto !important;
+  white-space: nowrap !important;
+}
+
+.stat-card .fp-value,
+.profile-stat-grid .fp-value,
+.duel-result-card .fp-value,
+.profile-pill .fp-value {
+  display: inline-block !important;
+  line-height: 1 !important;
+}
+
+.stat-card .fp-icon,
+.profile-stat-grid .fp-icon,
+.duel-result-card .fp-icon,
+.profile-pill .fp-icon {
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  height: 1em !important;
+  margin: 0 !important;
+  object-fit: contain !important;
+  vertical-align: -0.08em !important;
+  width: 1em !important;
+}
+
+.profile-pill > span:first-child {
+  gap: 0.34rem !important;
+}
+
+#pillUsername {
+  font-size: 1.12rem;
+}
+
+.profile-pill small {
+  margin-top: 0.08rem;
+}
+
+.action-card {
+  background: linear-gradient(135deg, rgba(155, 17, 30, 0.98), rgba(109, 18, 25, 0.96)) !important;
+  border: 1px solid rgba(244, 208, 111, 0.34) !important;
+  box-shadow: 0 18px 42px rgba(155, 17, 30, 0.18) !important;
+  color: #fff7e6 !important;
+}
+
+.action-card span {
+  color: #ffe49a !important;
+  text-shadow: 0 1px 0 rgba(60, 17, 12, 0.32);
+}
+
+.action-card h3,
+.action-card strong {
+  color: #fff7e6 !important;
+}
+
+.action-card small {
+  color: rgba(255, 247, 230, 0.78) !important;
+}
+
+.action-card:hover {
+  border-color: rgba(255, 228, 154, 0.62) !important;
+  box-shadow: 0 22px 56px rgba(155, 17, 30, 0.26) !important;
+  transform: translateY(-2px);
+}

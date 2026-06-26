@@ -498,10 +498,11 @@ function renderDuelProgress() {
   const userCorrect = state.duelUserAnswers.filter((value) => value === true).length;
   const opponentVisible = state.duelOpponentAnswers.slice(0, opponentDone);
   const opponentCorrect = opponentVisible.filter((value) => value === true).length;
+  const opponentActiveIndex = Math.min(opponentDone, total - 1);
   $("#duelUserScore").textContent = `${userCorrect} benar · Soal ${Math.min(userDone + 1, total)}/${total}`;
   $("#duelOpponentScore").textContent = `${opponentCorrect} benar · Soal ${Math.min(opponentDone + 1, total)}/${total}`;
   renderScoreBars($("#duelUserBars"), state.duelUserAnswers, activeIndex);
-  renderScoreBars($("#duelOpponentBars"), state.duelOpponentAnswers.map((value, index) => index < opponentDone ? value : null), activeIndex);
+  renderScoreBars($("#duelOpponentBars"), state.duelOpponentAnswers, opponentActiveIndex);
 }
 
 function renderScoreBars(root, answers, activeIndex) {
@@ -658,12 +659,23 @@ function showPage(page) {
   $("#pageTitle").textContent = config[1];
   $$(".page").forEach((view) => view.classList.toggle("is-active", view.dataset.view === page));
   $$("[data-page]").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.page === page));
-  $(".sidebar").classList.remove("is-open");
+  closeMobileSidebar();
   if (page === "members") loadMembers().catch((err) => toast(err.message));
   if (page === "leaderboard") loadLeaderboard().catch((err) => toast(err.message));
   if (page === "badges") loadBadges().catch((err) => toast(err.message));
   if (page === "about") renderAbout();
   if (page === "settings") renderSettings();
+}
+
+function closeMobileSidebar() {
+  $(".sidebar")?.classList.remove("is-open");
+  document.body.classList.remove("sidebar-open");
+}
+
+function toggleMobileSidebar() {
+  const sidebar = $(".sidebar");
+  const isOpen = sidebar.classList.toggle("is-open");
+  document.body.classList.toggle("sidebar-open", isOpen);
 }
 
 function getDailyDuelLimit() {
@@ -1110,7 +1122,13 @@ async function refreshDuelStatus() {
   if (status?.opponentAnswered !== undefined) {
     const visible = Math.min(status.opponentAnswered, state.duelOpponentAnswers.length);
     state.duelOpponentAnsweredCount = visible;
-    state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => index < visible ? "done" : null);
+    if (Array.isArray(status.opponentAnswers)) {
+      state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => (
+        index < status.opponentAnswers.length ? status.opponentAnswers[index] : value
+      ));
+    } else {
+      state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => index < visible ? "done" : null);
+    }
     renderDuelProgress();
   }
   if (status?.status === "finished" && state.duel) {
@@ -1138,7 +1156,7 @@ async function loadLeaderboard() {
 
 function renderLeaderboard(data) {
   $("#leaderboardRows").innerHTML = data.rows.map((row) => `
-    <article class="leader-row top-${row.rank}">
+    <article class="leader-row top-${row.rank} ${row.id === state.me?.id ? "is-me" : ""}">
       <strong>#${row.rank}</strong>
       <div class="leader-player"><span class="avatar-ring" style="--avatar-color:${profileColor(row)}"><img src="${avatar(row)}" alt="" /></span><span><strong>${row.name}</strong><small>@${row.username}</small></span></div>
       <span>${levelName(row.lifetime_fp)}</span>
@@ -1579,7 +1597,15 @@ function bindEvents() {
   setDuelTopMode("idle");
 
   $("#profilePill").addEventListener("click", () => showPage("settings"));
-  $("#mobileMenuBtn").addEventListener("click", () => $(".sidebar").classList.toggle("is-open"));
+  $("#mobileMenuBtn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMobileSidebar();
+  });
+  document.addEventListener("click", (event) => {
+    if (!document.body.classList.contains("sidebar-open")) return;
+    if (event.target.closest(".sidebar") || event.target.closest("#mobileMenuBtn")) return;
+    closeMobileSidebar();
+  });
   $("#genderPicker").addEventListener("click", (event) => {
     const button = event.target.closest("[data-gender]");
     if (!button) return;

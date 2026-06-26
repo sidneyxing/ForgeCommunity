@@ -1339,10 +1339,19 @@ function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
 async function duelStatusPayload(db, duel, viewerId) {
   const side = participantSide(duel, viewerId);
   const answers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", duel.id));
+  const questionLinks = unwrap(await db
+    .from("duel_questions")
+    .select("question_id, position")
+    .eq("duel_id", duel.id)
+    .order("position", { ascending: true }));
   const mineId = side === "opponent" ? duel.opponent_id : duel.user_id;
   const theirsId = side === "opponent" ? duel.user_id : duel.opponent_id;
   const mine = answers.filter((answer) => answer.user_id === mineId);
   const theirs = answers.filter((answer) => answer.user_id === theirsId);
+  const theirsByQuestion = new Map(theirs.map((answer) => [answer.question_id, Boolean(answer.is_correct)]));
+  const opponentAnswers = questionLinks.map((link) => (
+    theirsByQuestion.has(link.question_id) ? theirsByQuestion.get(link.question_id) : null
+  ));
   const score = scoreForSide(duel, side);
   return {
     duelId: duel.id,
@@ -1350,6 +1359,7 @@ async function duelStatusPayload(db, duel, viewerId) {
     result: resultForSide(resultForDuel(duel), side),
     mineAnswered: mine.length,
     opponentAnswered: duel.opponent_id ? theirs.length : Math.min(mine.length, DUEL_QUESTION_COUNT),
+    opponentAnswers,
     mineScore: duel.status === "finished" ? score.mine : mine.filter((answer) => answer.is_correct).length,
     opponentScore: duel.status === "finished" ? score.theirs : duel.opponent_id ? theirs.filter((answer) => answer.is_correct).length : Number(duel.opponent_score || 0),
     fpAwarded: side === "opponent" ? Number(duel.opponent_fp_awarded || 0) : Number(duel.fp_awarded || 0),

@@ -74,19 +74,31 @@ const soundFiles = {
 
 async function api(path, options = {}) {
   const token = getStoredSessionToken();
-  const response = await fetch(path, {
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-    credentials: "same-origin",
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  const payload = await response.json().catch(() => ({}));
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {}),
+      },
+      credentials: "same-origin",
+      ...options,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new Error("Koneksi ke server gagal. Cek internet atau deploy API.");
+  }
+  const raw = await response.text().catch(() => "");
+  let payload = {};
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    payload = {};
+  }
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+    const message = payload.error || payload.message || raw || `Request failed (${response.status})`;
+    throw new Error(message.length > 240 ? `${message.slice(0, 240)}...` : message);
   }
   return payload;
 }
@@ -558,7 +570,10 @@ function startResultCountdown() {
 
 function renderShell() {
   $("#pillUsername").textContent = state.me.username;
-  $("#pillFp").innerHTML = fpDisplay(state.me.lifetime_fp);
+  const pillFp = $("#pillFp");
+  if (pillFp?.parentElement) {
+    pillFp.parentElement.innerHTML = `<span id="pillFp">${fpDisplay(state.me.lifetime_fp)}</span>`;
+  }
   $("#pillAvatar").src = avatar(state.me);
   applyAvatarColor($("#pillAvatarWrap"), state.me);
   $("#sideFire").textContent = `${state.me.fire_streak_days} hari`;
@@ -818,9 +833,9 @@ function renderMemberList(members) {
 function duelRecordBoxes(wins = 0, losses = 0, draws = 0) {
   return `
     <span class="record-boxes" aria-label="Win ${wins}, Lose ${losses}, Draw ${draws}">
-      <span><b>${Number(wins || 0)}</b><small>Win</small></span>
-      <span><b>${Number(losses || 0)}</b><small>Lose</small></span>
-      <span><b>${Number(draws || 0)}</b><small>Draw</small></span>
+      <span><b>${Number(wins || 0)}</b> <small>Win</small></span>
+      <span><b>${Number(losses || 0)}</b> <small>Lose</small></span>
+      <span><b>${Number(draws || 0)}</b> <small>Draw</small></span>
     </span>
   `;
 }

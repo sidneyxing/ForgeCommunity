@@ -2480,3 +2480,235 @@ select:focus {
   margin: 1rem 0;
   padding: 0.85rem;
 }
+
+/* UI refinement patch: FP, daily flame, duel logo, badges, records */
+@media (min-width: 861px) {
+  .app-view {
+    grid-template-columns: 300px 1fr;
+  }
+}
+
+.profile-pill {
+  min-width: 220px;
+  white-space: nowrap;
+}
+
+.profile-pill > span:first-child {
+  display: grid;
+  min-width: 112px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.profile-pill small {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-width: 108px;
+  white-space: nowrap;
+}
+
+.profile-pill .fp-chip,
+.profile-pill .fp-value {
+  display: inline-flex;
+}
+
+.profile-pill .fp-chip {
+  justify-content: center;
+  min-width: 5.8rem;
+}
+
+.profile-pill .fp-icon {
+  height: 1em !important;
+  width: 1em !important;
+}
+
+.profile-pill > .avatar-ring img {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.fp-chip {
+  flex-wrap: nowrap;
+  min-width: 7.75rem;
+  white-space: nowrap;
+}
+
+.about-fp-name .fp-chip,
+.point-orb .fp-chip,
+.profile-pill .fp-chip {
+  min-width: 0;
+}
+
+.stat-card .fp-chip,
+.member-level-cell .fp-chip,
+.member-profile-stats .fp-chip,
+.profile-stat-grid .fp-chip,
+.leader-row .fp-chip,
+.legend-person .fp-chip,
+.duel-history-item .fp-chip,
+.duel-result-card .fp-chip {
+  justify-content: flex-start;
+}
+
+.daily-flame {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 66px minmax(0, 1fr);
+  min-height: 112px;
+  padding: 1rem;
+}
+
+.daily-flame-icon {
+  align-self: center;
+  flex-basis: 66px;
+  height: 66px;
+  width: 66px;
+}
+
+.daily-flame > div {
+  min-width: 0;
+}
+
+.daily-flame > div > span {
+  display: block;
+  white-space: nowrap;
+}
+
+.daily-flame strong {
+  font-size: 2.35rem;
+}
+
+.daily-flame small {
+  display: none;
+}
+
+.duel-panel,
+.duel-centerpiece {
+  overflow: visible;
+}
+
+.duel-top {
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 330px) minmax(0, 1fr);
+}
+
+.duel-top-logo {
+  border-radius: 0;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  overflow: visible;
+  width: min(330px, 24vw);
+}
+
+.badge-tile {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  justify-content: flex-start;
+  min-height: 190px;
+}
+
+.badge-tile strong {
+  display: block;
+  line-height: 1.18;
+  margin-top: 0.15rem;
+  min-height: 2.45em;
+  text-align: center;
+  width: 100%;
+}
+
+.badge-tile small {
+  display: block;
+  margin-top: auto;
+  text-align: center;
+  width: 100%;
+}
+
+.badge-icon {
+  display: flex;
+  flex: 0 0 auto;
+  margin: 0 auto 0.35rem;
+}
+
+.badge-tile:not(.locked) .badge-icon {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100px;
+  margin-bottom: 0.2rem;
+  width: 100%;
+}
+
+.badge-tile:not(.locked) .badge-img {
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.badge-tile.locked .badge-icon {
+  margin-bottom: 0.4rem;
+}
+
+.badge-modal-card {
+  max-width: min(660px, 94vw);
+  padding: 1.6rem;
+}
+
+.badge-modal-card .badge-icon {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  height: 190px;
+  margin: 0 auto 0.8rem;
+  width: min(240px, 70vw);
+}
+
+.badge-modal-card .badge-img {
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.mini-actions .heart-action {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--red);
+  font-size: 1.8rem;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.mini-actions .heart-action:not(.is-on) {
+  color: var(--red);
+}
+
+.record-boxes > span {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.record-boxes b,
+.record-boxes small {
+  line-height: 1;
+}
+
+@media (max-width: 860px) {
+  .app-view {
+    display: block;
+  }
+
+  .duel-top {
+    grid-template-columns: 1fr 150px 1fr;
+  }
+
+  .duel-top-logo {
+    width: min(210px, 42vw);
+  }
+}

@@ -623,6 +623,7 @@ async function mePayload(db, user) {
   const settings = await settingsFor(db, user.id);
   await runStorageMaintenance(db, user.id);
   await cleanupDuelHistory(db, user.id);
+  await awardBadges(db, user.id);
   const unlocked = await db.from("user_badges").select("badge_id", { count: "exact", head: true }).eq("user_id", user.id);
   const total = await db.from("badges").select("id", { count: "exact", head: true });
   const leaders = unwrap(await db.from("users").select("id, username, weekly_fp, lifetime_fp, created_at").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
@@ -1091,7 +1092,7 @@ async function ensureDailyQuestionPool(db, force = false) {
     .filter((category) => (grouped.get(category.key)?.length || 0) < DAILY_CATEGORY_QUESTION_COUNT)
     .map((category) => `${category.label} (${grouped.get(category.key)?.length || 0}/${DAILY_CATEGORY_QUESTION_COUNT})`);
   if (missing.length) {
-    throw Object.assign(new Error(`Stok soal aktif kurang. Minimal ${DAILY_CATEGORY_QUESTION_COUNT} soal aktif per kategori: ${missing.join(", ")}.`), { status: 500 });
+    throw Object.assign(new Error(`Stok soal aktif kurang. Minimal ${DAILY_CATEGORY_QUESTION_COUNT} soal aktif per kategori: ${missing.join(", ")}.`), { status: 400 });
   }
 
   const selected = QUESTION_CATEGORIES.flatMap((category) => (
@@ -1438,7 +1439,7 @@ async function awardBadges(db, userId) {
   if (await hasFlawlessRound(db, userId)) awards.add("b_141");
   if (await todayFastCorrectCount(db, userId) >= 7) awards.add("b_142");
   if (await hasClutchVictory(db, userId)) awards.add("b_143");
-  if (await todayCorrectCount(db, userId) >= 35) awards.add("b_144");
+  if (await hasPerfectBrainDay(db, userId)) awards.add("b_144");
   if (await currentWeeklyRank(db, userId) <= 10) awards.add("b_145");
   if ((thirdCount.count || 0) >= 1) awards.add("b_146");
   if ((secondCount.count || 0) >= 1) awards.add("b_147");
@@ -1463,6 +1464,36 @@ async function todayCorrectCount(db, userId) {
     .gte("answered_at", startOfTodayIso());
   if (result.error) throw result.error;
   return result.count || 0;
+}
+
+async function hasPerfectBrainDay(db, userId) {
+  const todayStart = startOfTodayIso();
+  const duels = unwrap(await db
+    .from("duels")
+    .select("user_id, opponent_id, user_score, opponent_score, fp_awarded, opponent_fp_awarded, status, started_at")
+    .or(`user_id.eq.${userId},opponent_id.eq.${userId}`)
+    .eq("status", "finished")
+    .gte("started_at", todayStart)
+    .order("started_at", { ascending: true })
+    .limit(100));
+
+  if (!duels.length) return false;
+
+  const answers = unwrap(await db
+    .from("duel_answers")
+    .select("duel_id, is_correct, answered_at")
+    .eq("user_id", userId)
+    .gte("answered_at", todayStart)
+    .order("answered_at", { ascending: true })
+    .limit(1000));
+
+  if (answers.length < duels.length * DUEL_QUESTION_COUNT) return false;
+  if (answers.some((answer) => !answer.is_correct)) return false;
+
+  return duels.every((duel) => {
+    const side = participantSide(duel, userId);
+    return resultForSide(resultForDuel(duel), side) !== "lose";
+  });
 }
 
 async function todayFastCorrectCount(db, userId) {

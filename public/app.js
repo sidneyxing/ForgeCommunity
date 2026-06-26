@@ -347,6 +347,10 @@ function numericLevel(points) {
   return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
 }
 
+function statClass(label = "") {
+  return `stat-${String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+}
+
 function fpDisplay(value, { signed = false, label = false } = {}) {
   const number = Number(value || 0);
   const prefix = signed && number >= 0 ? "+" : "";
@@ -1259,12 +1263,12 @@ function renderSettings() {
         ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],
         ["Rekor Duel", duelRecordBoxes(state.me.wins, state.me.losses, state.me.draws)],
         ["Jawaban Benar", state.me.total_correct],
-        ["Rata-rata Waktu", avgTime(state.me)],
         ["Streak Menang", `${state.me.current_win_streak} menang`],
-        ["Akun Dibuat", state.me.created_at ? new Date(state.me.created_at).toLocaleDateString("id-ID") : "-"],
         ["Fire Streak", `${state.me.fire_streak_days} hari`],
+        ["Rata-rata Waktu", avgTime(state.me)],
+        ["Akun Dibuat", state.me.created_at ? new Date(state.me.created_at).toLocaleDateString("id-ID") : "-"],
         ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
-      ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")}
+      ].map(([label, value]) => `<div class="${statClass(label)}"><span>${label}</span><strong>${value}</strong></div>`).join("")}
     </div>
   `;
 }

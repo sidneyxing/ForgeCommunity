@@ -2493,14 +2493,21 @@ select:focus {
 
 .profile-pill {
   min-width: 220px;
+  gap: 1.05rem;
   white-space: nowrap;
 }
 
 .profile-pill > span:first-child {
   display: grid;
+  gap: 0.2rem;
   min-width: 112px;
   text-align: center;
   white-space: nowrap;
+}
+
+#pillUsername {
+  font-size: 1.08rem;
+  line-height: 1;
 }
 
 .profile-pill small {
@@ -2533,7 +2540,8 @@ select:focus {
 
 .fp-chip {
   flex-wrap: nowrap;
-  min-width: 7.75rem;
+  max-width: 100%;
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -2554,12 +2562,59 @@ select:focus {
   justify-content: flex-start;
 }
 
+.stat-card strong,
+.profile-stat-grid strong {
+  align-items: center;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.stat-card .fp-chip,
+.profile-stat-grid .fp-chip {
+  min-width: 6.8rem;
+  width: max-content;
+}
+
+.stat-card .fp-chip .fp-icon,
+.profile-stat-grid .fp-chip .fp-icon {
+  height: 1em;
+  width: 1em;
+}
+
+.profile-stat-grid .stat-total-poin,
+.profile-stat-grid .stat-badge-unlocked {
+  min-height: 116px;
+}
+
+@media (min-width: 861px) {
+  .profile-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .profile-stat-grid .stat-rekor-duel {
+    grid-column: 3;
+    grid-row: span 3;
+  }
+
+  .profile-stat-grid .stat-jawaban-benar,
+  .profile-stat-grid .stat-streak-menang,
+  .profile-stat-grid .stat-fire-streak,
+  .profile-stat-grid .stat-rata-rata-waktu {
+    min-height: 96px;
+  }
+}
+
 .daily-flame {
+  align-items: center;
   display: grid;
   gap: 0.85rem;
   grid-template-columns: 66px minmax(0, 1fr);
   min-height: 112px;
   padding: 1rem;
+}
+
+.daily-flame .flame-orb {
+  display: none;
 }
 
 .daily-flame-icon {
@@ -2579,7 +2634,7 @@ select:focus {
 }
 
 .daily-flame strong {
-  font-size: clamp(1.9rem, 2.1vw, 2.35rem);
+  font-size: clamp(1.7rem, 1.7vw, 2.05rem);
   white-space: nowrap;
 }
 

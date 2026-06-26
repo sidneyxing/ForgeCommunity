@@ -2863,3 +2863,51 @@ select:focus {
   box-shadow: 0 22px 56px rgba(155, 17, 30, 0.26) !important;
   transform: translateY(-2px);
 }
+
+/* Duel result cards should stay straight, centered, and readable. */
+.duel-result {
+  max-width: min(1040px, 96vw) !important;
+}
+
+.duel-result-grid {
+  align-items: stretch;
+  grid-template-columns: repeat(4, minmax(180px, 1fr)) !important;
+  gap: 1.25rem !important;
+}
+
+.duel-result-card,
+.duel-result-card.tilt-left,
+.duel-result-card.tilt-right {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  min-height: 126px;
+  padding: 1.15rem 1rem !important;
+  text-align: center;
+  transform: none !important;
+}
+
+.duel-result-card span {
+  font-size: 0.84rem !important;
+  line-height: 1.05;
+}
+
+.duel-result-card strong {
+  display: flex !important;
+  font-size: clamp(2.15rem, 3.4vw, 3.35rem) !important;
+  justify-content: center !important;
+  margin-top: 0.42rem !important;
+  text-align: center;
+}
+
+.duel-result-card .fp-chip {
+  justify-content: center !important;
+  transform: scale(1.25);
+  transform-origin: center;
+}
+
+@media (max-width: 980px) {
+  .duel-result-grid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr)) !important;
+  }
+}

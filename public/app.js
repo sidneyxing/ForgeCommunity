@@ -62,7 +62,7 @@ const soundFiles = {
   duelStart: "/sounds/duel-start.mp3",
   matchBeep: "/sounds/beep.mp3",
   matchStart: "/sounds/ting.mp3",
-  tick: "/sounds/clock-tick.mp3",
+  tick: "/sounds/tik.mp3",
   correct: "/sounds/correct.mp3",
   wrong: "/sounds/wrong.mp3",
   notif: "/sounds/notif.mp3",
@@ -1480,10 +1480,10 @@ async function finishDuel({ fromSync = false } = {}) {
     <h1>${resultTitle}</h1>
     <p class="result-copy">${resultMessage}</p>
     <div class="duel-result-grid">
-      <article class="duel-result-card tilt-left"><span>Poin Kamu</span><strong>${result.userScore}</strong></article>
-      <article class="duel-result-card tilt-right"><span>Poin Lawan</span><strong>${result.opponentScore}</strong></article>
-      <article class="duel-result-card tilt-left"><span>Lifetime FP</span><strong>${fpDisplay(nextLifetimeFp)}</strong></article>
-      <article class="duel-result-card tilt-right"><span>Weekly FP</span><strong>${fpDisplay(nextWeeklyFp)}</strong></article>
+      <article class="duel-result-card"><span>Poin Kamu</span><strong>${result.userScore}</strong></article>
+      <article class="duel-result-card"><span>Poin Lawan</span><strong>${result.opponentScore}</strong></article>
+      <article class="duel-result-card"><span>Lifetime FP</span><strong>${fpDisplay(nextLifetimeFp)}</strong></article>
+      <article class="duel-result-card"><span>Weekly FP</span><strong>${fpDisplay(nextWeeklyFp)}</strong></article>
     </div>
     <div class="duel-result-actions">
       <button class="btn primary" id="rematchCountdownBtn">Cari Lawan Baru (20)</button>

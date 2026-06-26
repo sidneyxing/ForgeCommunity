@@ -623,6 +623,8 @@ async function mePayload(db, user) {
   const settings = await settingsFor(db, user.id);
   await runStorageMaintenance(db, user.id);
   await cleanupDuelHistory(db, user.id);
+  await resetExpiredFireStreak(db, user);
+  user = normalizeUserFireStreak(user);
   await awardBadges(db, user.id);
   const unlocked = await db.from("user_badges").select("badge_id", { count: "exact", head: true }).eq("user_id", user.id);
   const total = await db.from("badges").select("id", { count: "exact", head: true });
@@ -778,7 +780,7 @@ async function members(req, res, db, user) {
   const tab = String(req.query.tab || "all");
   const rels = unwrap(await db.from("relationships").select("owner_id, target_id, is_favourite").eq("owner_id", user.id));
   const relByTarget = new Map(rels.map((rel) => [rel.target_id, rel]));
-  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_seen_at").neq("id", user.id);
+  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_fire_date, last_seen_at").neq("id", user.id);
   if (q) query = query.or(`username.ilike.%${q}%,name.ilike.%${q}%,given_id.ilike.%${q}%`);
   if (tab === "favourites") {
     const ids = rels.filter((rel) => rel.is_favourite).map((rel) => rel.target_id);
@@ -788,6 +790,7 @@ async function members(req, res, db, user) {
   const rows = unwrap(await query.order("weekly_fp", { ascending: false }).order("username", { ascending: true }).limit(80));
   const onlineCutoff = Date.now() - ONLINE_CUTOFF_MS;
   const members = rows.map((member) => {
+    member = normalizeUserFireStreak(member);
     const rel = relByTarget.get(member.id) || {};
     const online = member.last_seen_at && new Date(member.last_seen_at).getTime() > onlineCutoff;
     return { ...member, online, is_friend: true, is_favourite: Boolean(rel.is_favourite) };
@@ -909,16 +912,17 @@ async function cleanupExpiredDuelRequests(db) {
 }
 
 async function leaderboard(res, db) {
-  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
-  const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
-  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
-  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
-  const fastest = rows
+  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days, last_fire_date").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
+  const normalizedRows = rows.map(normalizeUserFireStreak);
+  const ranked = normalizedRows.map((row, index) => ({ ...row, rank: index + 1, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
+  const fire = [...normalizedRows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
+  const mostWins = [...normalizedRows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
+  const fastest = normalizedRows
     .filter((row) => row.total_answers)
     .sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))
     .slice(0, 3)
     .map((row) => ({ username: row.username, avg_time: `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` }));
-  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
+  const lifetime = [...normalizedRows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
   const latestSnapshot = unwrap(await db
     .from("weekly_rank_snapshots")
     .select("week_key")
@@ -1518,6 +1522,25 @@ function nextFireStreak(user) {
   if (user.last_fire_date === today) return { fire_streak_days: user.fire_streak_days || 1, last_fire_date: today };
   if (user.last_fire_date === yesterdayDate()) return { fire_streak_days: Number(user.fire_streak_days || 0) + 1, last_fire_date: today };
   return { fire_streak_days: 1, last_fire_date: today };
+}
+
+function activeFireStreakDays(user = {}) {
+  if (!user.last_fire_date) return 0;
+  if (user.last_fire_date === todayDate() || user.last_fire_date === yesterdayDate()) {
+    return Number(user.fire_streak_days || 0);
+  }
+  return 0;
+}
+
+function normalizeUserFireStreak(user = {}) {
+  return { ...user, fire_streak_days: activeFireStreakDays(user) };
+}
+
+async function resetExpiredFireStreak(db, user = {}) {
+  if (!user.id || !user.last_fire_date) return;
+  if (activeFireStreakDays(user) !== 0 || Number(user.fire_streak_days || 0) === 0) return;
+  await db.from("users").update({ fire_streak_days: 0 }).eq("id", user.id);
+  user.fire_streak_days = 0;
 }
 
 function normalizeCategory(value = "") {

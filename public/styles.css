@@ -2896,3 +2896,144 @@ select:focus {
 .admin-reset-card .btn {
   width: 100%;
 }
+
+/* FORGE UI patch: settings layout, fire streak, FP cards, about spacing */
+@media (min-width: 861px) {
+  .settings-grid {
+    align-items: start;
+    grid-auto-flow: row dense;
+  }
+
+  #profileForm.settings-card {
+    align-self: start;
+    grid-row: span 2;
+  }
+
+  #changePasswordForm.settings-card,
+  #settingsForm.settings-card,
+  .duel-history-card,
+  #profileStats.settings-card {
+    align-self: start;
+  }
+}
+
+#changePasswordForm.settings-card {
+  min-height: 0;
+  padding-bottom: 1rem;
+}
+
+#changePasswordForm .btn {
+  margin-top: 0.15rem;
+}
+
+.daily-flame {
+  align-items: center !important;
+  grid-template-columns: 74px minmax(0, 1fr) !important;
+  min-height: 112px;
+}
+
+.daily-flame-icon {
+  height: 72px !important;
+  width: 72px !important;
+}
+
+.daily-flame > div {
+  align-content: center;
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.daily-flame > div > span {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.05;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.daily-flame strong {
+  display: block;
+  font-size: clamp(2.05rem, 2.25vw, 2.62rem) !important;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+  max-width: 100%;
+  overflow: visible;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.stat-card.fp-stat {
+  align-content: center;
+  min-height: 148px;
+  overflow: visible;
+}
+
+.stat-card.fp-stat strong {
+  font-size: clamp(2.35rem, 3.45vw, 3.35rem) !important;
+  letter-spacing: -0.045em;
+  overflow: visible;
+}
+
+.stat-card.fp-stat .fp-chip {
+  max-width: 100%;
+  min-width: 0 !important;
+  overflow: visible;
+  white-space: nowrap !important;
+}
+
+.stat-card.fp-stat .fp-icon {
+  height: 0.74em !important;
+  margin-left: 0.08rem;
+  width: 0.74em !important;
+}
+
+.about-card p {
+  line-height: 1.55;
+}
+
+.about-inline-fp {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.18rem;
+  font-weight: 900;
+  vertical-align: -0.08em;
+  white-space: nowrap;
+}
+
+.about-inline-fp img {
+  display: inline-block;
+  height: 1.12em;
+  object-fit: contain;
+  width: 1.12em;
+}
+
+.about-card .fp-chip {
+  min-width: 0 !important;
+  width: auto !important;
+}
+
+@media (max-width: 860px) {
+  .daily-flame {
+    grid-template-columns: 64px minmax(0, 1fr) !important;
+    min-height: 104px;
+  }
+
+  .daily-flame-icon {
+    height: 62px !important;
+    width: 62px !important;
+  }
+
+  .daily-flame strong {
+    font-size: clamp(1.95rem, 8vw, 2.45rem) !important;
+  }
+
+  .stat-card.fp-stat {
+    min-height: 132px;
+  }
+
+  .stat-card.fp-stat strong {
+    font-size: clamp(2rem, 9vw, 2.75rem) !important;
+  }
+}

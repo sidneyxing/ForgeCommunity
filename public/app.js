@@ -869,12 +869,16 @@ function setSettingsCardOrder() {
   const accountCard = $("#settingsForm")?.closest(".settings-card");
   const adminResetCard = $("#adminResetPasswordForm")?.closest(".settings-card");
   const statsCard = $("#profileStats");
+
+  // Desktop layout:
+  // kiri: Pengaturan Profil, kanan atas: Change Password, kanan bawah: Pengaturan Akun.
+  // Row berikutnya tetap Riwayat Duel sejajar dengan Statistik Profil.
   if (profileCard) profileCard.style.order = "1";
   if (changePasswordCard) changePasswordCard.style.order = "2";
-  if (historyCard) historyCard.style.order = "3";
-  if (accountCard) accountCard.style.order = "4";
-  if (adminResetCard) adminResetCard.style.order = "5";
-  if (statsCard) statsCard.style.order = "6";
+  if (accountCard) accountCard.style.order = "3";
+  if (historyCard) historyCard.style.order = "4";
+  if (statsCard) statsCard.style.order = "5";
+  if (adminResetCard) adminResetCard.style.order = "6";
 }
 
 function isCurrentUserAdmin() {
@@ -1270,7 +1274,7 @@ function renderAbout() {
     ["Tujuan Komunitas", "Membuat member aktif, saling mengenal, dan bertumbuh lewat pertanyaan berbobot."],
     ["Forge Points", `<span class="about-fp-line"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
-    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
+    ["Sistem Level", `Level 1 sampai Level 100. Setiap <span class="about-inline-fp"><span>1.000</span><img src="/image/fp.png" alt="FP" loading="lazy" /></span> lifetime naik 1 level.`],
     ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
     ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],
@@ -1301,10 +1305,7 @@ function renderSettings() {
     <div class="profile-stat-grid">
       <div class="copy-stat"><span>ID Pemain</span><strong>${state.me.given_id}</strong><button type="button" data-copy-value="${escapeHtml(state.me.given_id)}" data-copy-label="ID Pemain">Copy ID</button></div>
       <div class="copy-stat"><span>Username</span><strong>@${state.me.username}</strong><button type="button" data-copy-value="${escapeHtml(state.me.username)}" data-copy-label="Username">Copy Username</button></div>
-      <div class="copy-stat"><span>Email Aktif</span><strong>${state.me.email || "-"}</strong><button type="button" data-copy-value="${escapeHtml(state.me.email || "")}" data-copy-label="Email">Copy Email</button></div>
       ${[
-        ["Kota", state.me.city || "-"],
-        ["Jenis Kelamin", genderLabel(state.me.gender)],
         ["Level Pemain", levelName(state.me.lifetime_fp)],
         ["Total Poin", fpDisplay(state.me.lifetime_fp)],
         ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],

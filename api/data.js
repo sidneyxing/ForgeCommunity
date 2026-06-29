@@ -234,37 +234,37 @@ const badgeSeeds = [
   {
     "id": "b_35",
     "name": "FP Elite",
-    "description": "Mengumpulkan 10.000 Forge Points.",
+    "description": "Mengumpulkan 7.500 Forge Points.",
     "img_url": "/badges/35.png"
   },
   {
     "id": "b_36",
     "name": "FP Master",
-    "description": "Mengumpulkan 25.000 Forge Points.",
+    "description": "Mengumpulkan 10.000 Forge Points.",
     "img_url": "/badges/36.png"
   },
   {
     "id": "b_37",
     "name": "FP Grandmaster",
-    "description": "Mengumpulkan 50.000 Forge Points.",
+    "description": "Mengumpulkan 25.000 Forge Points.",
     "img_url": "/badges/37.png"
   },
   {
     "id": "b_38",
     "name": "FP Legend",
-    "description": "Mengumpulkan 100.000 Forge Points.",
+    "description": "Mengumpulkan 50.000 Forge Points.",
     "img_url": "/badges/38.png"
   },
   {
     "id": "b_39",
     "name": "FP Glory",
-    "description": "Mengumpulkan 250.000 Forge Points.",
+    "description": "Mengumpulkan 75.000 Forge Points.",
     "img_url": "/badges/39.png"
   },
   {
     "id": "b_40",
     "name": "Forge Eternal",
-    "description": "Mengumpulkan 500.000 Forge Points.",
+    "description": "Mengumpulkan 100.000 Forge Points.",
     "img_url": "/badges/40.png"
   },
   {

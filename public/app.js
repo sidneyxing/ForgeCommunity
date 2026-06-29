@@ -2,6 +2,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
 const DAILY_DUEL_LIMIT = 7;
+const LEVEL_FP_REQUIREMENT = 1000;
 const SESSION_STORAGE_KEY = "forge_session_token";
 
 const state = {
@@ -97,8 +98,11 @@ async function api(path, options = {}) {
     payload = {};
   }
   if (!response.ok) {
-    const message = payload.error || payload.message || raw || `Request failed (${response.status})`;
-    throw new Error(message.length > 240 ? `${message.slice(0, 240)}...` : message);
+    let message = payload.error || payload.message || raw || `Request failed (${response.status})`;
+    if (/FUNCTION_INVOCATION_FAILED|server error has occurred/i.test(message)) {
+      message = "API Vercel gagal dijalankan. Pastikan file api/[...path].js dan api/data.js sudah ada, Environment Variables sudah tersimpan, lalu Redeploy. Cek detailnya di Vercel > Functions > Logs.";
+    }
+    throw new Error(message.length > 260 ? `${message.slice(0, 260)}...` : message);
   }
   return payload;
 }
@@ -340,11 +344,11 @@ function applyTheme() {
 }
 
 function levelName(points) {
-  return `Level ${Math.min(100, Math.floor(Number(points || 0) / 1000) + 1)}`;
+  return `Level ${Math.min(100, Math.floor(Number(points || 0) / LEVEL_FP_REQUIREMENT) + 1)}`;
 }
 
 function numericLevel(points) {
-  return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
+  return Math.min(100, Math.floor(Number(points || 0) / LEVEL_FP_REQUIREMENT) + 1);
 }
 
 function fpDisplay(value, { signed = false, label = false } = {}) {
@@ -362,8 +366,8 @@ function fpDisplay(value, { signed = false, label = false } = {}) {
 function levelProgress(points) {
   const level = numericLevel(points);
   const total = Math.max(0, Number(points || 0));
-  const current = level >= 100 ? 1000 : total % 1000;
-  const required = 1000;
+  const current = level >= 100 ? LEVEL_FP_REQUIREMENT : total % LEVEL_FP_REQUIREMENT;
+  const required = LEVEL_FP_REQUIREMENT;
   const percent = level >= 100 ? 100 : Math.max(0, Math.min(100, (current / required) * 100));
   return { level, current, required, percent, nextLevel: Math.min(100, level + 1) };
 }
@@ -1160,24 +1164,27 @@ function renderLeaderboard(data) {
     </article>
   `).join("") || `<p class="muted">Belum ada data peringkat.</p>`;
 
-  const topList = (title, rows = [], valueFn = () => "-") => `
-    <div class="legend-block">
-      <strong>${title}</strong>
-      ${rows.length ? rows.map((row, index) => `
-        <article class="legend-person">
-          <span class="legend-medal">#${index + 1}</span>
-          <span><b>@${row.username}</b><small>${valueFn(row)}</small></span>
-        </article>
-      `).join("") : `<p class="muted">Belum ada data.</p>`}
-    </div>
-  `;
+  const topList = (title, rows = [], valueFn = () => "-", limit = 1) => {
+    const visibleRows = rows.slice(0, limit);
+    return `
+      <div class="legend-block ${limit === 1 ? "legend-block-single" : ""}">
+        <strong>${title}</strong>
+        ${visibleRows.length ? visibleRows.map((row, index) => `
+          <article class="legend-person">
+            <span class="legend-medal">#${index + 1}</span>
+            <span><b>@${row.username}</b><small>${valueFn(row)}</small></span>
+          </article>
+        `).join("") : `<p class="muted">Belum ada data.</p>`}
+      </div>
+    `;
+  };
 
   $("#hallOfLegends").innerHTML = `
-    ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`)}
-    ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
-    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
-    ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
-    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
+    ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`, 3)}
+    ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`, 1)}
+    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`, 1)}
+    ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp), 1)}
+    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`, 1)}
   `;
 }
 
@@ -1255,7 +1262,7 @@ function renderAbout() {
     ["Tujuan Komunitas", "Membuat member aktif, saling mengenal, dan bertumbuh lewat pertanyaan berbobot."],
     ["Forge Points", `<span class="about-fp-line"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
-    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
+    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(LEVEL_FP_REQUIREMENT)} lifetime naik 1 level.`],
     ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
     ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],

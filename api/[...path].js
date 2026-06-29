@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { pbkdf2Sync, randomBytes, webcrypto } from "node:crypto";
-import { makeBadgeSeeds, seedQuestions } from "./data.js";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const DAILY_DUEL_LIMIT = 7;
@@ -49,6 +48,7 @@ const CATEGORY_BADGE_START = {
   english: 131,
 };
 let seedPromise;
+let seedModulePromise;
 let weeklySeasonCheckedKey;
 let maintenanceLastRunAt = 0;
 
@@ -93,6 +93,11 @@ export default async function handler(req, res) {
 
     return send(res, 404, { error: "API route not found." });
   } catch (error) {
+    console.error("FORGE_API_ERROR", {
+      message: error?.message || "Server error",
+      status: error?.status || 500,
+      stack: error?.stack,
+    });
     return send(res, error.status || 500, { error: error.message || "Server error" });
   }
 }
@@ -328,7 +333,21 @@ function ensureSeedOnce(db) {
   return seedPromise;
 }
 
+async function loadSeedData() {
+  // Keep seed data as a lazy import so public auth/reset routes do not crash
+  // when api/data.js is missing or not copied during deployment.
+  seedModulePromise ||= import("./data.js").catch((error) => {
+    seedModulePromise = undefined;
+    const message = error?.code === "ERR_MODULE_NOT_FOUND"
+      ? "api/data.js belum ada di deployment. Copy data.js ke folder api/ karena [...path].js memakai import ./data.js."
+      : error?.message || "Seed data gagal dimuat.";
+    throw Object.assign(new Error(message), { status: 500 });
+  });
+  return seedModulePromise;
+}
+
 async function ensureSeed(db) {
+  const { makeBadgeSeeds, seedQuestions } = await loadSeedData();
   const badgeSeeds = makeBadgeSeeds();
   const badgeCount = await db.from("badges").select("id", { count: "exact", head: true });
   if (!badgeCount.error && !badgeCount.count) {
@@ -494,20 +513,53 @@ function compareBadgesByGroup(a, b) {
   return badgeGroupOrder(a) - badgeGroupOrder(b) || badgeNumber(a) - badgeNumber(b) || String(a.name || "").localeCompare(String(b.name || ""));
 }
 
+function normalizeSenderEmail(value = "") {
+  return String(value || "").trim().replace(/^['"]|['"]$/g, "");
+}
+
+function resetSenderFromEnv() {
+  const directFrom = normalizeSenderEmail(process.env.RESET_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || "");
+  if (directFrom) return directFrom;
+
+  const fromEmail = normalizeSenderEmail(process.env.RESET_FROM_ADDRESS || process.env.RESEND_FROM_ADDRESS || "");
+  const fromName = normalizeSenderEmail(process.env.RESET_FROM_NAME || "FORGE");
+  if (fromEmail) return `${fromName} <${fromEmail}>`;
+
+  return "FORGE <onboarding@resend.dev>";
+}
+
+function resendErrorMessage(status, detail = "") {
+  const message = String(detail || "").trim();
+  if (status === 403 && /own email address|verify a domain|resend\.dev|domain/i.test(message)) {
+    return "Resend menolak pengiriman. Kalau memakai onboarding@resend.dev, email tujuan harus sama dengan email akun Resend. Untuk kirim ke user lain, verify domain dulu di Resend lalu pakai sender dari domain itu.";
+  }
+  if (status === 401 || /api key|unauthorized|invalid/i.test(message)) {
+    return "RESEND_API_KEY tidak valid atau belum tersimpan di Environment Variables Vercel.";
+  }
+  if (status === 422 || /from|sender|domain/i.test(message)) {
+    return "RESET_FROM_EMAIL belum benar. Format aman: FORGE <onboarding@resend.dev> atau FORGE <noreply@domain-terverifikasi.com>.";
+  }
+  return message || "Cek RESEND_API_KEY, RESET_FROM_EMAIL, dan domain sender Resend.";
+}
+
 async function sendPasswordResetEmail(email, code) {
   const apiKey = process.env.RESEND_API_KEY || "";
-  const from = process.env.RESET_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || "";
-  const replyTo = process.env.RESET_REPLY_TO_EMAIL || process.env.FORGE_SUPPORT_EMAIL || "";
+  const from = resetSenderFromEnv();
+  const replyTo = normalizeSenderEmail(process.env.RESET_REPLY_TO_EMAIL || process.env.FORGE_SUPPORT_EMAIL || "");
+  const timeoutMs = Math.max(3000, Math.min(15000, Number(process.env.RESEND_TIMEOUT_MS || 8000)));
 
-  if (!apiKey || !from) {
-    throw Object.assign(new Error("Email reset belum dikonfigurasi admin. Isi RESEND_API_KEY dan RESET_FROM_EMAIL di Environment Variables Vercel."), { status: 500 });
+  if (!apiKey) {
+    throw Object.assign(new Error("Email reset belum dikonfigurasi admin. Isi RESEND_API_KEY di Environment Variables Vercel."), { status: 500 });
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   let responseText = "";
   try {
     response = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
@@ -515,7 +567,7 @@ async function sendPasswordResetEmail(email, code) {
       },
       body: JSON.stringify({
         from,
-        to: email,
+        to: [email],
         subject: "Kode Reset Password FORGE",
         text: `Kode reset password FORGE kamu: ${code}. Kode berlaku 15 menit. Abaikan email ini kalau kamu tidak meminta reset password.`,
         html: `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#2a211e"><p>Kode reset password FORGE kamu:</p><h1 style="letter-spacing:6px;color:#9b111e">${code}</h1><p>Kode berlaku 15 menit.</p><p>Abaikan email ini kalau kamu tidak meminta reset password.</p></div>`,
@@ -524,18 +576,23 @@ async function sendPasswordResetEmail(email, code) {
     });
     responseText = await response.text().catch(() => "");
   } catch (error) {
-    throw Object.assign(new Error(`Email reset gagal terhubung ke Resend: ${error.message || "network error"}`), { status: 502 });
+    const isAbort = error?.name === "AbortError";
+    throw Object.assign(new Error(isAbort
+      ? "Email reset timeout saat menghubungi Resend. Coba lagi, atau cek Vercel Function Region/network."
+      : `Email reset gagal terhubung ke Resend: ${error.message || "network error"}`), { status: 502 });
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!response.ok) {
     let detail = responseText;
     try {
       const parsed = responseText ? JSON.parse(responseText) : null;
-      detail = parsed?.message || parsed?.error || responseText;
+      detail = parsed?.message || parsed?.error || parsed?.name || responseText;
     } catch {
       // Keep raw text if Resend returns non-JSON.
     }
-    throw Object.assign(new Error(`Email reset gagal dikirim via Resend (${response.status}). ${detail || "Cek RESEND_API_KEY dan RESET_FROM_EMAIL."}`), { status: 502 });
+    throw Object.assign(new Error(`Email reset gagal dikirim via Resend (${response.status}). ${resendErrorMessage(response.status, detail)}`), { status: 502 });
   }
 }
 
@@ -972,14 +1029,14 @@ async function leaderboard(res, db, viewer = null) {
   await cleanupOldWeeklySnapshots(db);
   const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
   const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, is_me: row.id === viewer?.id, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
-  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
-  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
+  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 1).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
+  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 1).map(({ username, wins }) => ({ username, wins }));
   const fastest = rows
     .filter((row) => row.total_answers)
     .sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))
-    .slice(0, 3)
+    .slice(0, 1)
     .map((row) => ({ username: row.username, avg_time: `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` }));
-  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
+  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 1).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
   const latestSnapshot = unwrap(await db
     .from("weekly_rank_snapshots")
     .select("week_key")

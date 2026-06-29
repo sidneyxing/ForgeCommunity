@@ -3416,3 +3416,423 @@ select:focus {
   margin-left: 0.12em !important;
   top: -0.02em !important;
 }
+/* =========================================================
+   UPGRADE NOTIFICATION + MEMBER PROFILE MODAL
+   Fitur:
+   - Notif badge baru dengan tombol Lihat Badge
+   - Notif invite duel dengan tombol Accept langsung
+   - Profile member tampil sebagai popup, bukan panel atas
+========================================================= */
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.rich-toast-stack {
+  bottom: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  max-width: min(420px, calc(100vw - 2rem));
+  position: fixed;
+  right: 1rem;
+  width: 100%;
+  z-index: 120;
+}
+
+.rich-toast {
+  animation: richToastIn 220ms ease both;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(244, 208, 111, 0.28), transparent 8rem),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(246, 234, 219, 0.96));
+  border: 1px solid rgba(212, 175, 55, 0.34);
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(42, 33, 30, 0.22);
+  color: var(--charcoal);
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding: 0.95rem 3rem 0.95rem 1rem;
+  position: relative;
+}
+
+.rich-toast::before {
+  background: linear-gradient(180deg, var(--red), var(--gold));
+  content: "";
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: 5px;
+}
+
+.rich-toast.is-leaving {
+  animation: richToastOut 160ms ease both;
+}
+
+.rich-toast-body strong {
+  color: var(--red);
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 1000;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.18rem;
+  text-transform: uppercase;
+}
+
+.rich-toast-body p {
+  color: var(--brown);
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.rich-toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.rich-toast-action {
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 1000;
+  min-height: 38px;
+  padding: 0.55rem 0.9rem;
+  text-transform: uppercase;
+}
+
+.rich-toast-action.primary {
+  background: linear-gradient(135deg, var(--red), #6f0d15);
+  box-shadow: 0 12px 26px rgba(155, 17, 30, 0.22);
+  color: #fff7e6;
+}
+
+.rich-toast-action.secondary {
+  background: rgba(212, 175, 55, 0.16);
+  border: 1px solid rgba(212, 175, 55, 0.32);
+  color: var(--brown);
+}
+
+.rich-toast-action:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.rich-toast-close {
+  align-items: center;
+  background: rgba(155, 17, 30, 0.08);
+  border: 1px solid rgba(155, 17, 30, 0.16);
+  border-radius: 999px;
+  color: var(--red);
+  display: inline-flex;
+  font-size: 1.1rem;
+  font-weight: 1000;
+  height: 32px;
+  justify-content: center;
+  position: absolute;
+  right: 0.75rem;
+  top: 0.75rem;
+  width: 32px;
+}
+
+.rich-toast-badge::after,
+.rich-toast-duel::after {
+  color: rgba(155, 17, 30, 0.09);
+  font-size: 4.5rem;
+  font-weight: 1000;
+  line-height: 1;
+  position: absolute;
+  right: 0.72rem;
+  top: 2.15rem;
+}
+
+.rich-toast-badge::after {
+  content: "◈";
+}
+
+.rich-toast-duel::after {
+  content: "⚔";
+}
+
+.request-item {
+  background:
+    radial-gradient(circle at 92% 15%, rgba(244, 208, 111, 0.24), transparent 7rem),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.94), rgba(246, 234, 219, 0.9)) !important;
+  border-color: rgba(212, 175, 55, 0.34) !important;
+}
+
+.request-actions [data-request-action="accept"] {
+  background: linear-gradient(135deg, var(--red), #6f0d15) !important;
+  border: 0 !important;
+  box-shadow: 0 12px 26px rgba(155, 17, 30, 0.18) !important;
+  color: #fff7e6 !important;
+}
+
+.member-profile-panel {
+  display: none !important;
+}
+
+.member-profile-modal {
+  align-items: center;
+  animation: modalFadeIn 160ms ease both;
+  display: grid;
+  inset: 0;
+  justify-items: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 110;
+}
+
+.member-profile-modal.is-closing {
+  animation: modalFadeOut 150ms ease both;
+}
+
+.member-profile-backdrop {
+  background: rgba(42, 33, 30, 0.48);
+  border: 0;
+  inset: 0;
+  position: absolute;
+}
+
+.member-profile-dialog {
+  max-height: min(86vh, 760px);
+  max-width: min(920px, 94vw);
+  overflow: auto;
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.member-profile-card-modal {
+  box-shadow: 0 28px 90px rgba(42, 33, 30, 0.3);
+  grid-template-columns: auto minmax(180px, 1fr) minmax(280px, 1.5fr);
+}
+
+.member-profile-close {
+  align-items: center;
+  background: linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(246, 234, 219, 0.92));
+  border: 1px solid rgba(155, 17, 30, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 12px 28px rgba(42, 33, 30, 0.16);
+  color: var(--red);
+  display: inline-flex;
+  font-size: 1.2rem;
+  font-weight: 1000;
+  height: 38px;
+  justify-content: center;
+  position: absolute;
+  right: 0.8rem;
+  top: 0.8rem;
+  width: 38px;
+  z-index: 2;
+}
+
+@keyframes richToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes richToastOut {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalFadeOut {
+  to { opacity: 0; }
+}
+
+/* =========================================================
+   MOBILE DUEL TOP FIX
+   Memastikan avatar, nama, score bar user/lawan tidak keluar edge layar HP.
+========================================================= */
+
+@media (max-width: 640px) {
+  .duel-panel {
+    border-radius: 18px;
+    padding: 0.75rem;
+  }
+
+  .duel-top {
+    align-items: start;
+    gap: 0.35rem;
+    grid-template-columns: minmax(0, 1fr) 82px minmax(0, 1fr) !important;
+    width: 100%;
+  }
+
+  .duel-centerpiece {
+    min-width: 0;
+  }
+
+  .duel-top-logo {
+    height: 78px !important;
+    width: 78px !important;
+  }
+
+  .timer-ring {
+    block-size: 76px;
+    inline-size: 76px;
+    padding: 0.45rem;
+  }
+
+  .timer-ring::before {
+    inset: 0.36rem;
+  }
+
+  .timer-ring span {
+    font-size: 1.7rem;
+  }
+
+  .timer-ring small {
+    font-size: 0.62rem;
+  }
+
+  .fighter,
+  .fighter.right {
+    align-items: start;
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .fighter {
+    grid-template-columns: 40px minmax(0, 1fr);
+    justify-items: start;
+    text-align: left;
+  }
+
+  .fighter.right {
+    grid-template-columns: minmax(0, 1fr) 40px;
+    justify-items: end;
+    text-align: right;
+  }
+
+  .fighter.right .avatar-ring {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .fighter.right .fighter-meta {
+    grid-column: 1;
+    grid-row: 1;
+    justify-items: end;
+    text-align: right;
+  }
+
+  .fighter .avatar-ring,
+  .fighter img {
+    height: 40px !important;
+    width: 40px !important;
+  }
+
+  .fighter .avatar-ring {
+    padding: 0.16rem;
+  }
+
+  .fighter-meta {
+    gap: 0.22rem;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .fighter-meta strong,
+  .fighter-meta > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fighter-meta strong {
+    font-size: 0.78rem;
+  }
+
+  .fighter-meta > span {
+    font-size: 0.68rem;
+  }
+
+  .duel-score-bars {
+    gap: 0.14rem;
+    grid-template-columns: repeat(5, minmax(7px, 1fr));
+    max-width: 86px;
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .duel-score-bars span {
+    height: 7px;
+  }
+
+  .rich-toast-stack {
+    bottom: 5.25rem;
+    left: 0.75rem;
+    max-width: none;
+    right: 0.75rem;
+    width: auto;
+  }
+
+  .member-profile-modal {
+    align-items: end;
+    padding: 0.75rem;
+  }
+
+  .member-profile-dialog {
+    max-height: 86vh;
+    max-width: 100%;
+  }
+
+  .member-profile-card-modal {
+    border-radius: 20px;
+    grid-template-columns: 1fr;
+    padding-top: 2.8rem;
+    text-align: center;
+  }
+
+  .member-profile-card-modal .avatar-ring-large {
+    height: 92px;
+    width: 92px;
+  }
+
+  .member-profile-card-modal .member-profile-stats {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+}
+
+@media (max-width: 390px) {
+  .duel-top {
+    grid-template-columns: minmax(0, 1fr) 68px minmax(0, 1fr) !important;
+  }
+
+  .duel-top-logo,
+  .timer-ring {
+    height: 64px !important;
+    width: 64px !important;
+  }
+
+  .duel-score-bars {
+    max-width: 74px;
+  }
+
+  .fighter-meta strong {
+    font-size: 0.72rem;
+  }
+
+  .fighter-meta > span {
+    font-size: 0.62rem;
+  }
+}

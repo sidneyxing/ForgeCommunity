@@ -46,6 +46,12 @@ const state = {
   memberRandomRanks: new Map(),
   renderedResultDuelId: null,
   resultSoundPlayedDuelIds: new Set(),
+  richToastSeq: 0,
+  richToastTimers: new Map(),
+  visibleInviteToastIds: new Set(),
+  visibleBadgeToastIds: new Set(),
+  memberProfileModalOpen: false,
+  memberProfileHistoryPushed: false,
 };
 
 const pages = {
@@ -164,6 +170,140 @@ function escapeHtml(value = "") {
 
 function showInlineError(target, message) {
   target.innerHTML = `<p class="muted">${message}</p>`;
+}
+
+function ensureRichToastStack() {
+  let stack = $("#richToastStack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "richToastStack";
+    stack.className = "rich-toast-stack";
+    stack.setAttribute("aria-live", "polite");
+    document.body.append(stack);
+  }
+  return stack;
+}
+
+function dismissRichToast(toastId) {
+  const toastEl = document.querySelector(`[data-rich-toast-id="${toastId}"]`);
+  const timer = state.richToastTimers.get(toastId);
+  if (timer) window.clearTimeout(timer);
+  state.richToastTimers.delete(toastId);
+  if (!toastEl) return;
+  toastEl.classList.add("is-leaving");
+  window.setTimeout(() => toastEl.remove(), 160);
+}
+
+function showRichToast({ type = "info", title = "FORGE", message = "", actions = [], autoCloseMs = 5200 } = {}) {
+  const stack = ensureRichToastStack();
+  const toastId = `rt_${++state.richToastSeq}`;
+  const toastEl = document.createElement("article");
+  toastEl.className = `rich-toast rich-toast-${type}`;
+  toastEl.dataset.richToastId = toastId;
+  toastEl.innerHTML = `
+    <button class="rich-toast-close" type="button" aria-label="Tutup notifikasi">×</button>
+    <div class="rich-toast-body">
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(message)}</p>
+    </div>
+    ${actions.length ? `<div class="rich-toast-actions"></div>` : ""}
+  `;
+
+  toastEl.querySelector(".rich-toast-close")?.addEventListener("click", () => dismissRichToast(toastId));
+  const actionsWrap = toastEl.querySelector(".rich-toast-actions");
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `rich-toast-action ${action.variant === "secondary" ? "secondary" : "primary"}`;
+    button.textContent = action.label || "Lihat";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.classList.add("is-loading");
+      try {
+        await action.onClick?.();
+        dismissRichToast(toastId);
+      } catch (err) {
+        button.disabled = false;
+        button.classList.remove("is-loading");
+        toast(err.message || "Aksi notifikasi gagal.");
+      }
+    });
+    actionsWrap?.append(button);
+  }
+
+  stack.prepend(toastEl);
+  playSound("notif", { overlap: true });
+
+  if (autoCloseMs > 0) {
+    const timer = window.setTimeout(() => dismissRichToast(toastId), autoCloseMs);
+    state.richToastTimers.set(toastId, timer);
+  }
+  return toastId;
+}
+
+function badgeTileById(badgeId) {
+  for (const tile of $$("#badgeGrid .badge-tile")) {
+    try {
+      const badge = JSON.parse(tile.dataset.badge.replace(/&apos;/g, "'"));
+      if (badge.id === badgeId) return tile;
+    } catch {
+      // Ignore broken dataset and continue.
+    }
+  }
+  return null;
+}
+
+async function openBadgeById(badgeId) {
+  showPage("badges");
+  await loadBadges().catch((err) => toast(err.message));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const tile = badgeTileById(badgeId);
+  if (!tile) return;
+  tile.scrollIntoView({ behavior: "smooth", block: "center" });
+  tile.focus({ preventScroll: true });
+  showBadgeDetail(tile);
+}
+
+function showBadgeUnlockNotification(badge = {}) {
+  if (!badge?.id || state.visibleBadgeToastIds.has(badge.id)) return;
+  state.visibleBadgeToastIds.add(badge.id);
+  showRichToast({
+    type: "badge",
+    title: "Badge baru terbuka",
+    message: badge.name ? `Kamu membuka badge ${badge.name}.` : "Kamu membuka badge baru.",
+    actions: [{ label: "Lihat Badge", onClick: () => openBadgeById(badge.id) }],
+    autoCloseMs: 9000,
+  });
+}
+
+function showDuelInviteNotification(request = {}) {
+  if (!request?.id || state.visibleInviteToastIds.has(request.id)) return;
+  state.visibleInviteToastIds.add(request.id);
+  const left = secondsLeft(request);
+  showRichToast({
+    type: "duel",
+    title: "Undangan Duel",
+    message: `@${request.requester_username || "member"} mengajak kamu duel. ${left > 0 ? `Sisa ${left} detik.` : "Segera respon."}`,
+    actions: [{ label: "Accept", onClick: () => respondDuelRequestById(request.id, "accept") }],
+    autoCloseMs: Math.max(4200, (left || 8) * 1000),
+  });
+}
+
+async function respondDuelRequestById(requestId, action = "accept") {
+  const data = await api(`/api/duel-requests/${requestId}/respond`, {
+    method: "POST",
+    body: { action },
+  });
+  await loadDuelRequests({ notify: false });
+  if (data.duel) {
+    state.realtimeClient?.channel(`forge-user-${data.duel.opponent_id || ""}`).send({
+      type: "broadcast",
+      event: "duel-accepted",
+      payload: { duelId: data.duel.id },
+    }).catch(() => {});
+    beginDuel(data.duel);
+  }
+  return data;
 }
 
 function activateAudio() {
@@ -728,7 +868,7 @@ async function loadDuelRequests({ notify = false } = {}) {
     for (const request of requests) {
       if (!state.seenRequestIds.has(request.id)) {
         state.seenRequestIds.add(request.id);
-        toast(`${request.requester_username} mengajak kamu duel. Accept dalam 20 detik.`);
+        showDuelInviteNotification(request);
       }
     }
     for (const request of outgoing) {
@@ -921,6 +1061,10 @@ function removeUnusedSettingsToggles() {
 function showMemberProfile(row) {
   const member = JSON.parse(row.dataset.member.replace(/&apos;/g, "'"));
   $$(".member-row").forEach((item) => item.classList.toggle("is-selected", item === row));
+  openMemberProfileModal(member);
+}
+
+function memberProfileStatsHtml(member) {
   const totalDuels = Number(member.wins || 0) + Number(member.losses || 0) + Number(member.draws || 0);
   const stats = [
     ["Kota", member.city || "-"],
@@ -933,25 +1077,73 @@ function showMemberProfile(row) {
     ["Jawaban Benar", (member.total_correct || 0).toLocaleString("id-ID")],
     ["Avg Time", avgTime(member)],
     ["Win Streak", `${member.current_win_streak || 0} menang`],
-    ["Fire Streak", `${member.fire_streak_days} hari`],
+    ["Fire Streak", `${member.fire_streak_days || 0} hari`],
     ["Status", member.online ? "Online" : "Offline"],
   ];
-  $("#memberProfilePanel").innerHTML = `
-    <article class="member-profile-card">
-      <span class="avatar-ring avatar-ring-large" style="--avatar-color:${profileColor(member)}"><img src="${avatar(member)}" alt="" /></span>
-      <div class="member-profile-main">
-        <p class="eyebrow">Profile Member</p>
-        <h3>${member.name}</h3>
-        <small>@${member.username} / ID ${member.given_id} · ${member.city || "-"}</small>
-      </div>
-      <div class="member-profile-stats">
-        ${stats.map(([label, value]) => {
-          const fpClass = /fp/i.test(label) ? ' class="fp-stat"' : "";
-          return `<div${fpClass}><span>${label}</span><strong>${value}</strong></div>`;
-        }).join("")}
-      </div>
-    </article>
-  `;
+
+  return stats.map(([label, value]) => {
+    const fpClass = /fp/i.test(label) ? ' class="fp-stat"' : "";
+    return `<div${fpClass}><span>${label}</span><strong>${value}</strong></div>`;
+  }).join("");
+}
+
+function openMemberProfileModal(member = {}) {
+  const wasOpen = state.memberProfileModalOpen;
+  document.querySelector(".member-profile-modal")?.remove();
+  document.body.classList.add("modal-open");
+  state.memberProfileModalOpen = true;
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="member-profile-modal" role="dialog" aria-modal="true" aria-label="Profile member ${escapeHtml(member.username || "")}">
+      <button class="member-profile-backdrop" type="button" data-member-modal-close aria-label="Tutup profile member"></button>
+      <article class="member-profile-dialog">
+        <button class="member-profile-close" type="button" data-member-modal-close aria-label="Tutup">×</button>
+        <div class="member-profile-card member-profile-card-modal">
+          <span class="avatar-ring avatar-ring-large" style="--avatar-color:${profileColor(member)}"><img src="${avatar(member)}" alt="" /></span>
+          <div class="member-profile-main">
+            <p class="eyebrow">Profile Member</p>
+            <h3>${escapeHtml(member.name || "Member")}</h3>
+            <small>@${escapeHtml(member.username || "member")} / ID ${escapeHtml(member.given_id || "-")} · ${escapeHtml(member.city || "-")}</small>
+          </div>
+          <div class="member-profile-stats">
+            ${memberProfileStatsHtml(member)}
+          </div>
+        </div>
+      </article>
+    </div>
+  `);
+
+  if (!wasOpen) {
+    try {
+      history.pushState({ ...(history.state || {}), forgeMemberProfileModal: true }, "", window.location.href);
+      state.memberProfileHistoryPushed = true;
+    } catch {
+      state.memberProfileHistoryPushed = false;
+    }
+  }
+}
+
+function closeMemberProfileModal({ fromHistory = false } = {}) {
+  const modal = document.querySelector(".member-profile-modal");
+  if (!modal && !state.memberProfileModalOpen) return;
+
+  if (!fromHistory && state.memberProfileHistoryPushed) {
+    try {
+      history.back();
+      return;
+    } catch {
+      // Continue close normally if history.back is blocked.
+    }
+  }
+
+  state.memberProfileModalOpen = false;
+  state.memberProfileHistoryPushed = false;
+  document.body.classList.remove("modal-open");
+  $$(".member-row").forEach((item) => item.classList.remove("is-selected"));
+
+  if (!modal) return;
+  modal.classList.add("is-closing");
+  window.setTimeout(() => modal.remove(), 150);
 }
 
 function secondsLeft(request) {
@@ -1033,19 +1225,7 @@ async function inviteDuel(memberId) {
 }
 
 async function respondDuelRequest(button) {
-  const data = await api(`/api/duel-requests/${button.dataset.requestId}/respond`, {
-    method: "POST",
-    body: { action: button.dataset.requestAction },
-  });
-  await loadDuelRequests({ notify: false });
-  if (data.duel) {
-    state.realtimeClient?.channel(`forge-user-${data.duel.opponent_id || ""}`).send({
-      type: "broadcast",
-      event: "duel-accepted",
-      payload: { duelId: data.duel.id },
-    }).catch(() => {});
-    beginDuel(data.duel);
-  }
+  return respondDuelRequestById(button.dataset.requestId, button.dataset.requestAction);
 }
 
 function beginDuel(duel) {
@@ -1601,7 +1781,7 @@ async function finishDuel({ fromSync = false } = {}) {
   }
   if (didLevelUp) toast(`Selamat, kamu naik ke ${nextLevel}.`);
   for (const badge of result.newBadges || []) {
-    toast(`Selamat, kamu membuka badge baru: ${badge.name}`);
+    showBadgeUnlockNotification(badge);
   }
   if (state.resultSoundPlayedDuelIds.has(state.duel.id)) return;
   state.resultSoundPlayedDuelIds.add(state.duel.id);
@@ -1670,6 +1850,18 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-value]");
     if (copyButton) copyText(copyButton.dataset.copyValue, copyButton.dataset.copyLabel).catch((err) => toast(err.message));
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-member-modal-close]")) closeMemberProfileModal();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.memberProfileModalOpen) closeMemberProfileModal();
+  });
+
+  window.addEventListener("popstate", () => {
+    if (state.memberProfileModalOpen) closeMemberProfileModal({ fromHistory: true });
   });
 
   $("#duelTopLogo").addEventListener("error", (event) => {

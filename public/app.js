@@ -194,7 +194,7 @@ function dismissRichToast(toastId) {
   window.setTimeout(() => toastEl.remove(), 160);
 }
 
-function showRichToast({ type = "info", title = "FORGE", message = "", actions = [], autoCloseMs = 5200 } = {}) {
+function showRichToast({ type = "info", title = "FORGE", message = "", messageHtml = "", actions = [], autoCloseMs = 5200 } = {}) {
   const stack = ensureRichToastStack();
   const toastId = `rt_${++state.richToastSeq}`;
   const toastEl = document.createElement("article");
@@ -204,7 +204,7 @@ function showRichToast({ type = "info", title = "FORGE", message = "", actions =
     <button class="rich-toast-close" type="button" aria-label="Tutup notifikasi">×</button>
     <div class="rich-toast-body">
       <strong>${escapeHtml(title)}</strong>
-      <p>${escapeHtml(message)}</p>
+      <p>${messageHtml || escapeHtml(message)}</p>
     </div>
     ${actions.length ? `<div class="rich-toast-actions"></div>` : ""}
   `;
@@ -215,7 +215,8 @@ function showRichToast({ type = "info", title = "FORGE", message = "", actions =
     const button = document.createElement("button");
     button.type = "button";
     button.className = `rich-toast-action ${action.variant === "secondary" ? "secondary" : "primary"}`;
-    button.textContent = action.label || "Lihat";
+    button.dataset.toastAction = action.action || action.label || "action";
+    button.innerHTML = `<span>${escapeHtml(action.label || "Lihat")}</span>`;
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.classList.add("is-loading");
@@ -280,16 +281,47 @@ function showDuelInviteNotification(request = {}) {
   if (!request?.id || state.visibleInviteToastIds.has(request.id)) return;
   state.visibleInviteToastIds.add(request.id);
   const left = secondsLeft(request);
-  showRichToast({
+  const toastId = showRichToast({
     type: "duel",
     title: "Undangan Duel",
-    message: `@${request.requester_username || "member"} mengajak kamu duel. ${left > 0 ? `Sisa ${left} detik.` : "Segera respon."}`,
+    messageHtml: `@${escapeHtml(request.requester_username || "member")} mengajak kamu duel. <span class="rich-toast-countdown" data-invite-countdown="${escapeHtml(request.id)}">${left > 0 ? `Sisa ${left} detik.` : "Segera respon."}</span>`,
     actions: [
-      { label: "Accept", variant: "primary", onClick: () => respondDuelRequestById(request.id, "accept") },
-      { label: "Tolak", variant: "secondary", onClick: () => respondDuelRequestById(request.id, "decline") },
+      { label: "Accept", action: "accept", variant: "primary", onClick: () => respondDuelRequestById(request.id, "accept") },
+      { label: "Tolak", action: "decline", variant: "secondary", onClick: () => respondDuelRequestById(request.id, "decline") },
     ],
     autoCloseMs: Math.max(4200, (left || 8) * 1000),
   });
+  const toastEl = document.querySelector(`[data-rich-toast-id="${toastId}"]`);
+  if (toastEl) {
+    toastEl.dataset.requestId = request.id;
+    toastEl.dataset.expiresAt = request.expires_at || "";
+    toastEl.dataset.expiresInMs = String(Number(request.expires_in_ms || 0));
+    toastEl.dataset.receivedAtMs = String(Number(request.received_at_ms || Date.now()));
+  }
+  updateInviteToastCountdowns();
+}
+
+function secondsLeftFromToast(toastEl) {
+  if (!toastEl) return 0;
+  if (toastEl.dataset.expiresAt) {
+    return Math.max(0, Math.ceil((new Date(toastEl.dataset.expiresAt).getTime() - Date.now()) / 1000));
+  }
+  const expiresInMs = Number(toastEl.dataset.expiresInMs || 0);
+  const receivedAtMs = Number(toastEl.dataset.receivedAtMs || Date.now());
+  if (Number.isFinite(expiresInMs) && expiresInMs > 0) {
+    return Math.max(0, Math.ceil((expiresInMs - (Date.now() - receivedAtMs)) / 1000));
+  }
+  return 0;
+}
+
+function updateInviteToastCountdowns() {
+  for (const toastEl of $$(".rich-toast-duel[data-request-id]")) {
+    const left = secondsLeftFromToast(toastEl);
+    const countdown = toastEl.querySelector("[data-invite-countdown]");
+    if (countdown) countdown.textContent = left > 0 ? `Sisa ${left} detik.` : "Waktu accept habis.";
+    const acceptButton = toastEl.querySelector('[data-toast-action="accept"]');
+    if (acceptButton && left <= 0) acceptButton.disabled = true;
+  }
 }
 
 async function respondDuelRequestById(requestId, action = "accept") {
@@ -896,10 +928,11 @@ function startRequestCountdownTimer() {
   clearInterval(state.requestCountdownTimer);
   const hasPending = [...state.currentIncomingRequests, ...state.currentOutgoingRequests]
     .some((request) => request.status === "pending" && secondsLeft(request) > 0);
+  updateInviteToastCountdowns();
   if (!hasPending) return;
   state.requestCountdownTimer = window.setInterval(() => {
-    if (state.currentPage !== "members") return;
-    renderRequests(state.currentIncomingRequests, state.currentOutgoingRequests);
+    updateInviteToastCountdowns();
+    if (state.currentPage === "members") renderRequests(state.currentIncomingRequests, state.currentOutgoingRequests);
     const stillPending = [...state.currentIncomingRequests, ...state.currentOutgoingRequests]
       .some((request) => request.status === "pending" && secondsLeft(request) > 0);
     if (!stillPending) {
@@ -1430,22 +1463,56 @@ async function loadBadges() {
   }
 }
 
+const SECRET_BADGE_NAMES = new Set([
+  "flawless round",
+  "speed strike",
+  "clutch victor",
+  "perfect brain",
+  "top ten week",
+  "bronze week",
+  "silver week",
+  "gold week",
+  "c for christ",
+  "peak of forge",
+]);
+
+function isSecretBadge(badge = {}) {
+  const idNumber = Number(String(badge.id || "").match(/_(\d+)$/)?.[1] || 0);
+  const normalizedName = String(badge.real_name || badge.name || "").trim().toLowerCase();
+  return (idNumber >= 141 && idNumber <= 150) || SECRET_BADGE_NAMES.has(normalizedName);
+}
+
+function badgeDisplayName(badge = {}) {
+  if (!badge.earned_at && isSecretBadge(badge)) return "???";
+  return badge.name || badge.real_name || "Badge";
+}
+
+function badgeDisplayDescription(badge = {}) {
+  if (badge.earned_at) return badge.description || "Badge berhasil terbuka.";
+  if (isSecretBadge(badge)) return "Nama dan syarat badge ini masih tersembunyi sampai kamu berhasil membukanya.";
+  return "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya.";
+}
+
 function renderBadges(data) {
   $("#badgeProgress").textContent = `${data.unlocked}/${data.total} terbuka`;
   const badgeDetail = $("#badgeDetail");
   badgeDetail?.classList.add("is-hidden");
   if (badgeDetail) badgeDetail.innerHTML = "";
-  $("#badgeGrid").innerHTML = data.badges.map((badge) => `
-    <button class="badge-tile ${badge.earned_at ? "" : "locked"}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
-      <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
-      <strong>${badge.name}</strong>
-      <small>${badge.earned_at ? "Terbuka" : "Terkunci"}</small>
-    </button>
-  `).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
+  $("#badgeGrid").innerHTML = data.badges.map((badge) => {
+    const name = badgeDisplayName(badge);
+    const secretClass = !badge.earned_at && isSecretBadge(badge) ? " secret-locked" : "";
+    return `
+      <button class="badge-tile ${badge.earned_at ? "" : `locked${secretClass}`}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
+        <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
+        <strong>${escapeHtml(name)}</strong>
+        <small>${badge.earned_at ? "Terbuka" : "Terkunci"}</small>
+      </button>
+    `;
+  }).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
 }
 
 function badgeVisual(badge) {
-  const fallback = escapeHtml((badge.name || "?").trim().charAt(0).toUpperCase() || "?");
+  const fallback = escapeHtml((badgeDisplayName(badge) || "?").trim().charAt(0).toUpperCase() || "?");
   if (!badge.img_url) return fallback;
   return `<img class="badge-img" src="${escapeHtml(badge.img_url)}" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='${fallback}'" />`;
 }
@@ -1454,14 +1521,17 @@ function showBadgeDetail(button) {
   const badge = JSON.parse(button.dataset.badge.replace(/&apos;/g, "'"));
   document.querySelector(".badge-modal")?.remove();
   const earnedAt = badge.earned_at ? formatDateTimeId(badge.earned_at) : null;
+  const displayName = badgeDisplayName(badge);
+  const displayDescription = badgeDisplayDescription(badge);
+  const modalClass = badge.earned_at ? "is-unlocked" : "is-locked";
   document.body.insertAdjacentHTML("beforeend", `
-    <div class="badge-modal" role="dialog" aria-modal="true">
+    <div class="badge-modal ${modalClass}" role="dialog" aria-modal="true">
       <button class="badge-modal-backdrop" type="button" data-badge-close aria-label="Tutup detail badge"></button>
       <article class="badge-modal-card">
         <button class="badge-modal-close" type="button" data-badge-close aria-label="Tutup">x</button>
         <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
-        <h3>${escapeHtml(badge.name)}</h3>
-        <p>${escapeHtml(badge.description)}</p>
+        <h3>${escapeHtml(displayName)}</h3>
+        <p>${escapeHtml(displayDescription)}</p>
         <p><strong>Status:</strong> ${badge.earned_at ? "Terbuka" : "Terkunci"}</p>
         ${earnedAt ? `<p><strong>Earned at:</strong> ${earnedAt}</p>` : ""}
       </article>

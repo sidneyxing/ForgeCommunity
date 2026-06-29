@@ -537,6 +537,25 @@ function compareBadgesByGroup(a, b) {
   return badgeGroupOrder(a) - badgeGroupOrder(b) || badgeNumber(a) - badgeNumber(b) || String(a.name || "").localeCompare(String(b.name || ""));
 }
 
+const SECRET_BADGE_NAMES = new Set([
+  "flawless round",
+  "speed strike",
+  "clutch victor",
+  "perfect brain",
+  "top ten week",
+  "bronze week",
+  "silver week",
+  "gold week",
+  "c for christ",
+  "peak of forge",
+]);
+
+function isSecretBadge(badge = {}) {
+  const number = badgeNumber(badge);
+  const normalizedName = String(badge.name || "").trim().toLowerCase();
+  return (number >= 141 && number <= 150) || SECRET_BADGE_NAMES.has(normalizedName);
+}
+
 function adminIdentifiers() {
   return String(process.env.ADMIN_USERS || process.env.ADMIN_USERNAMES || process.env.ADMIN_EMAILS || "")
     .split(",")
@@ -1172,16 +1191,21 @@ async function badges(res, db, user) {
     .map((badge) => {
       const earnedAt = earnedById.get(badge.id) || null;
       if (!earnedAt) {
+        const secret = isSecretBadge(badge);
         return {
           id: badge.id,
-          name: "???",
-          description: "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya.",
+          name: secret ? "???" : badge.name,
+          real_name: badge.name,
+          description: secret
+            ? "Nama dan syarat badge ini masih tersembunyi sampai kamu berhasil membukanya."
+            : "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya.",
           img_url: null,
           earned_at: null,
           locked: true,
+          secret_locked: secret,
         };
       }
-      return { ...badge, earned_at: earnedAt, locked: false };
+      return { ...badge, real_name: badge.name, earned_at: earnedAt, locked: false, secret_locked: false };
     })
     .sort((a, b) => {
       if (a.earned_at && !b.earned_at) return -1;

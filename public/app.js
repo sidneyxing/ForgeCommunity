@@ -284,7 +284,10 @@ function showDuelInviteNotification(request = {}) {
     type: "duel",
     title: "Undangan Duel",
     message: `@${request.requester_username || "member"} mengajak kamu duel. ${left > 0 ? `Sisa ${left} detik.` : "Segera respon."}`,
-    actions: [{ label: "Accept", onClick: () => respondDuelRequestById(request.id, "accept") }],
+    actions: [
+      { label: "Accept", variant: "primary", onClick: () => respondDuelRequestById(request.id, "accept") },
+      { label: "Tolak", variant: "secondary", onClick: () => respondDuelRequestById(request.id, "decline") },
+    ],
     autoCloseMs: Math.max(4200, (left || 8) * 1000),
   });
 }
@@ -1099,11 +1102,13 @@ function openMemberProfileModal(member = {}) {
       <article class="member-profile-dialog">
         <button class="member-profile-close" type="button" data-member-modal-close aria-label="Tutup">×</button>
         <div class="member-profile-card member-profile-card-modal">
-          <span class="avatar-ring avatar-ring-large" style="--avatar-color:${profileColor(member)}"><img src="${avatar(member)}" alt="" /></span>
-          <div class="member-profile-main">
-            <p class="eyebrow">Profile Member</p>
-            <h3>${escapeHtml(member.name || "Member")}</h3>
-            <small>@${escapeHtml(member.username || "member")} / ID ${escapeHtml(member.given_id || "-")} · ${escapeHtml(member.city || "-")}</small>
+          <div class="member-profile-modal-head">
+            <span class="avatar-ring avatar-ring-large" style="--avatar-color:${profileColor(member)}"><img src="${avatar(member)}" alt="" /></span>
+            <div class="member-profile-main">
+              <p class="eyebrow">Profile Member</p>
+              <h3>${escapeHtml(member.name || "Member")}</h3>
+              <small>@${escapeHtml(member.username || "member")} / ID ${escapeHtml(member.given_id || "-")} · ${escapeHtml(member.city || "-")}</small>
+            </div>
           </div>
           <div class="member-profile-stats">
             ${memberProfileStatsHtml(member)}
@@ -1717,8 +1722,24 @@ async function answerQuestion(option) {
   }, 120);
 }
 
+function showDuelCalculatingResult(message = "Menghitung hasil duel...") {
+  if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+  $("#duelActive")?.classList.add("is-hidden");
+  $("#duelResult")?.classList.remove("is-hidden");
+  setDuelTopMode("result");
+  const resultEl = $("#duelResult");
+  if (!resultEl) return;
+  resultEl.innerHTML = `
+    <div class="duel-loading-orb" aria-hidden="true"></div>
+    <p class="eyebrow">Duel selesai</p>
+    <h1>Loading...</h1>
+    <p class="result-copy">${escapeHtml(message)}</p>
+  `;
+}
+
 async function finishDuel({ fromSync = false } = {}) {
   if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+  showDuelCalculatingResult(fromSync ? "Sinkronisasi hasil dari lawan..." : "Jawaban kamu sedang disimpan. Mohon tunggu sebentar.");
   await Promise.all(state.duelAnswerSaves);
   const data = await api("/api/duel/finish", { method: "POST", body: { duelId: state.duel.id } });
   if (data.waiting) {

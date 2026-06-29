@@ -3836,3 +3836,249 @@ body.modal-open {
     font-size: 0.62rem;
   }
 }
+
+/* =========================================================
+   FIX UPGRADE - MEMBER MODAL, TOP NOTIFICATION, DUEL LOADING
+   Paste/replace sudah termasuk di file ini.
+   Tujuan:
+   - Popup member tidak kepotong / tidak horizontal scroll
+   - Notifikasi invite muncul dari atas
+   - Tombol Accept ada animasi merah bergerak
+   - Saat hasil duel sedang diproses, tampil loading rapi
+========================================================= */
+
+/* 1. Notifikasi muncul dari atas, bukan bawah */
+.rich-toast-stack {
+  bottom: auto !important;
+  left: auto !important;
+  right: 1rem !important;
+  top: max(1rem, env(safe-area-inset-top)) !important;
+  z-index: 140 !important;
+}
+
+.rich-toast {
+  animation: richToastInFromTop 220ms ease both !important;
+}
+
+.rich-toast.is-leaving {
+  animation: richToastOutToTop 160ms ease both !important;
+}
+
+@keyframes richToastInFromTop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes richToastOutToTop {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+}
+
+/* 2. Tombol Accept notifikasi dan request panel: animasi merah bergerak */
+.rich-toast-action.primary,
+.request-actions [data-request-action="accept"] {
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.rich-toast-action.primary::before,
+.request-actions [data-request-action="accept"]::before {
+  animation: acceptGlowMove 1.65s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 247, 230, 0.46), transparent);
+  content: "";
+  inset: 0 auto 0 -70%;
+  pointer-events: none;
+  position: absolute;
+  transform: skewX(-18deg);
+  width: 58%;
+}
+
+.rich-toast-action.primary > *,
+.request-actions [data-request-action="accept"] > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes acceptGlowMove {
+  0% { left: -75%; opacity: 0; }
+  18% { opacity: 0.86; }
+  58% { opacity: 0.72; }
+  100% { left: 125%; opacity: 0; }
+}
+
+/* Tombol Tolak di notifikasi */
+.rich-toast-action.secondary {
+  background: linear-gradient(135deg, rgba(255, 253, 248, 0.92), rgba(246, 234, 219, 0.82)) !important;
+  border: 1px solid rgba(155, 17, 30, 0.22) !important;
+  color: var(--red) !important;
+}
+
+/* 3. Popup profile member - anti kepotong */
+.member-profile-modal {
+  align-items: center !important;
+  justify-items: center !important;
+  overflow: hidden !important;
+  padding: clamp(0.75rem, 3vw, 1.25rem) !important;
+}
+
+.member-profile-dialog {
+  max-height: min(86vh, 780px) !important;
+  max-width: min(760px, calc(100vw - 2rem)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable both-edges;
+  width: 100% !important;
+}
+
+.member-profile-card-modal {
+  display: grid !important;
+  gap: 1rem !important;
+  grid-template-columns: 1fr !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  padding: clamp(1rem, 3vw, 1.25rem) !important;
+  padding-top: 3rem !important;
+  width: 100% !important;
+}
+
+.member-profile-modal-head {
+  align-items: center;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+}
+
+.member-profile-card-modal .avatar-ring-large {
+  height: clamp(82px, 16vw, 112px) !important;
+  margin: 0 !important;
+  width: clamp(82px, 16vw, 112px) !important;
+}
+
+.member-profile-card-modal .member-profile-main {
+  min-width: 0;
+}
+
+.member-profile-card-modal .member-profile-main h3,
+.member-profile-card-modal .member-profile-main small {
+  overflow-wrap: anywhere;
+}
+
+.member-profile-card-modal .member-profile-stats {
+  display: grid !important;
+  gap: 0.7rem !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.member-profile-card-modal .member-profile-stats > div {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.member-profile-card-modal .member-profile-stats strong {
+  overflow-wrap: anywhere;
+}
+
+.member-profile-card-modal .record-boxes {
+  grid-template-columns: 1fr !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.member-profile-card-modal .record-boxes > span {
+  min-height: 54px !important;
+}
+
+/* 4. Loading state setelah soal terakhir, supaya tidak terasa freeze/lag */
+.duel-loading-orb {
+  animation: duelLoadingPulse 900ms ease-in-out infinite;
+  background:
+    radial-gradient(circle at 35% 28%, #fff7cc, transparent 34%),
+    linear-gradient(145deg, var(--gold-2), var(--gold));
+  border: 7px solid rgba(169, 112, 47, 0.68);
+  border-radius: 50%;
+  box-shadow: 0 20px 56px rgba(212, 175, 55, 0.24), inset 0 0 0 5px rgba(255, 253, 248, 0.24);
+  height: clamp(92px, 14vw, 132px);
+  margin: -1.2rem auto 1rem;
+  position: relative;
+  width: clamp(92px, 14vw, 132px);
+}
+
+.duel-loading-orb::after {
+  animation: spin 760ms linear infinite;
+  border: 4px solid rgba(155, 17, 30, 0.18);
+  border-top-color: var(--red);
+  border-radius: 50%;
+  content: "";
+  height: 38%;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 38%;
+}
+
+@keyframes duelLoadingPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+
+@media (max-width: 640px) {
+  .rich-toast-stack {
+    bottom: auto !important;
+    left: 0.75rem !important;
+    max-width: none !important;
+    right: 0.75rem !important;
+    top: max(0.75rem, env(safe-area-inset-top)) !important;
+    width: auto !important;
+  }
+
+  .rich-toast {
+    border-radius: 16px !important;
+    padding: 0.9rem 2.75rem 0.9rem 0.95rem !important;
+  }
+
+  .member-profile-dialog {
+    max-height: min(84vh, 720px) !important;
+    max-width: calc(100vw - 1rem) !important;
+  }
+
+  .member-profile-card-modal {
+    border-radius: 20px !important;
+    padding: 0.9rem !important;
+    padding-top: 2.8rem !important;
+  }
+
+  .member-profile-modal-head {
+    grid-template-columns: 1fr !important;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .member-profile-card-modal .member-profile-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .member-profile-card-modal .member-profile-stats > div {
+    padding: 0.72rem !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .member-profile-card-modal .member-profile-stats {
+    grid-template-columns: 1fr !important;
+  }
+}

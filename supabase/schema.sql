@@ -590,7 +590,7 @@ begin
   v_duel_id := 'duel_' || replace(gen_random_uuid()::text, '-', '');
 
   insert into public.duels (id, user_id, opponent_id, opponent_name, status, started_at, starts_at)
-  select v_duel_id, p_user_id, u.id, u.username, 'active', now(), now() + interval '3 seconds'
+  select v_duel_id, p_user_id, u.id, u.username, 'active', now(), now() + interval '5 seconds'
     from public.users u
    where u.id = v_opponent_id;
 

@@ -8,6 +8,7 @@ const state = {
   me: null,
   dashboard: null,
   duel: null,
+  serverTimeOffsetMs: 0,
   duelIndex: 0,
   duelUserAnswers: [],
   duelOpponentAnswers: [],
@@ -101,6 +102,19 @@ async function api(path, options = {}) {
     throw new Error(message.length > 240 ? `${message.slice(0, 240)}...` : message);
   }
   return payload;
+}
+
+function syncServerClock(serverNowIso) {
+  if (!serverNowIso) return;
+
+  const serverMs = new Date(serverNowIso).getTime();
+  if (!Number.isFinite(serverMs)) return;
+
+  state.serverTimeOffsetMs = serverMs - Date.now();
+}
+
+function serverNowMs() {
+  return Date.now() + Number(state.serverTimeOffsetMs || 0);
 }
 
 function getStoredSessionToken() {
@@ -1035,6 +1049,7 @@ async function respondDuelRequest(button) {
 }
 
 function beginDuel(duel) {
+  syncServerClock(duel.server_now);
   clearResultCountdown();
   clearMatchmakingWatcher();
   clearDuelStartTimer();
@@ -1062,8 +1077,10 @@ function beginDuel(duel) {
 
 function startSyncedDuelCountdown() {
   const startsAtMs = new Date(state.duel?.starts_at || Date.now()).getTime();
-  const delayMs = startsAtMs - Date.now();
+  const delayMs = startsAtMs - serverNowMs();
+
   state.duelStartCountdownLastSecond = null;
+
   if (delayMs <= 250) {
     $("#duelResult").classList.add("is-hidden");
     $("#duelActive").classList.remove("is-hidden");
@@ -1076,18 +1093,23 @@ function startSyncedDuelCountdown() {
   $("#duelActive").classList.add("is-hidden");
   $("#duelResult").classList.remove("is-hidden");
   setDuelTopMode("result");
+
   const renderCountdown = () => {
-    const left = Math.max(1, Math.ceil((startsAtMs - Date.now()) / 1000));
-    if (left !== state.duelStartCountdownLastSecond && Date.now() < startsAtMs) {
+    const nowMs = serverNowMs();
+    const left = Math.max(1, Math.ceil((startsAtMs - nowMs) / 1000));
+
+    if (left !== state.duelStartCountdownLastSecond && nowMs < startsAtMs) {
       state.duelStartCountdownLastSecond = left;
       playSound("matchBeep", { overlap: true });
     }
+
     $("#duelResult").innerHTML = `
       <p class="eyebrow">Lawan ditemukan</p>
       <h1>Mulai dalam ${left}</h1>
       <p class="result-copy">Kamu dan lawan sudah masuk ruang duel. Soal akan muncul bersamaan.</p>
     `;
-    if (Date.now() >= startsAtMs) {
+
+    if (serverNowMs() >= startsAtMs) {
       clearDuelStartTimer();
       state.duelStartCountdownLastSecond = null;
       $("#duelResult").classList.add("is-hidden");
@@ -1097,6 +1119,7 @@ function startSyncedDuelCountdown() {
       renderQuestion();
     }
   };
+
   renderCountdown();
   state.duelStartTimer = window.setInterval(renderCountdown, 250);
 }
@@ -1138,6 +1161,7 @@ async function refreshDuelStatus() {
   if (!state.duel?.id) return;
   const data = await api(`/api/duel/${state.duel.id}/status`);
   const status = data.status;
+  syncServerClock(status?.server_now);
   if (Array.isArray(status?.opponentAnswers)) {
     const byQuestion = new Map(status.opponentAnswers.map((answer) => [answer.questionId, Boolean(answer.isCorrect)]));
     state.duelOpponentAnswers = state.duel.questions.map((question) => byQuestion.has(question.id) ? byQuestion.get(question.id) : null);
@@ -1407,26 +1431,59 @@ async function cancelMatchmaking() {
   toast("Pencarian lawan dibatalkan.");
 }
 
+function isValidQuestionImageUrl(value) {
+  const url = String(value ?? "").trim();
+  if (!url) return false;
+
+  const lowered = url.toLowerCase();
+  return !["null", "undefined", "none", "false", "-"].includes(lowered);
+}
+
 function renderQuestion() {
   clearInterval(state.duelTimer);
+
   const question = state.duel.questions[state.duelIndex];
+  const imageUrl = String(question.image_url ?? "").trim();
+  const hasImage = isValidQuestionImageUrl(imageUrl);
+
   state.answerLocked = false;
   renderDuelProgress();
   state.remaining = 10;
   state.questionStartedAt = performance.now();
+
   $("#timerValue").textContent = "10";
   $(".timer-ring").style.setProperty("--progress", "100%");
   $("#questionCounter").textContent = `Soal ${state.duelIndex + 1}/5`;
   $("#questionCategory").textContent = question.category;
+
+  $("#questionText").classList.toggle("has-question-image", hasImage);
   $("#questionText").innerHTML = `
-    ${question.image_url ? `<img class="question-image" src="${escapeHtml(question.image_url)}" alt="Gambar soal" loading="lazy" />` : ""}
-    <span>${escapeHtml(question.question)}</span>
+    ${
+      hasImage
+        ? `
+          <div class="question-image-wrap">
+            <img class="question-image" src="${escapeHtml(imageUrl)}" alt="Gambar soal" loading="lazy" />
+          </div>
+        `
+        : ""
+    }
+    <span class="question-copy">${escapeHtml(question.question)}</span>
   `;
+
+  const image = $("#questionText .question-image");
+  if (image) {
+    image.addEventListener("error", () => {
+      image.closest(".question-image-wrap")?.remove();
+      $("#questionText")?.classList.remove("has-question-image");
+    }, { once: true });
+  }
+
   $("#answersGrid").innerHTML = ["A", "B", "C", "D"].map((key) => `
     <button class="answer-btn" data-option="${key}">
       <strong>${key}</strong><span>${escapeHtml(question[`option_${key.toLowerCase()}`])}</span>
     </button>
   `).join("");
+
   state.duelTimer = setInterval(tickQuestion, 1000);
 }
 

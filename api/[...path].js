@@ -10,6 +10,7 @@ const QUESTION_ROLLING_WINDOW_DAYS = 60;
 const QUESTION_POOL_RETENTION_DAYS = 70;
 const QUESTION_TIME_LIMIT_MS = 10 * 1000;
 const DUEL_REQUEST_WAIT_MS = 20 * 1000;
+const DUEL_START_BUFFER_MS = 5 * 1000;
 const ONLINE_CUTOFF_MS = 2 * 60 * 1000;
 const MATCH_QUEUE_STALE_MS = 15 * 1000;
 const DUEL_SETTLE_GRACE_MS = 15 * 1000;
@@ -1365,6 +1366,7 @@ function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
     opponent_id: opponent?.id || (side === "user" ? duel.opponent_id : duel.user_id),
     status: duel.status,
     starts_at: duel.starts_at || duel.started_at,
+    server_now: new Date().toISOString(),
     result: resultForSide(resultForDuel(duel), side),
     opponent_name: opponent?.username || duel.opponent_name || "Forge Rival",
     opponent_gender: opponent?.gender || "male",
@@ -1393,6 +1395,7 @@ async function duelStatusPayload(db, duel, viewerId) {
   return {
     duelId: duel.id,
     status: duel.status,
+    server_now: new Date().toISOString(),
     result: resultForSide(resultForDuel(duel), side),
     mineAnswered: mine.length,
     opponentAnswered: duel.opponent_id ? theirs.length : Math.min(mine.length, DUEL_QUESTION_COUNT),
@@ -1429,7 +1432,7 @@ async function createDuel(db, user, opponentId = null) {
     user_id: user.id,
     opponent_id: opponent.id,
     opponent_name: opponent.username,
-    starts_at: new Date(Date.now() + 3000).toISOString(),
+    starts_at: new Date(Date.now() + DUEL_START_BUFFER_MS).toISOString(),
   }));
   unwrap(await db.from("duel_questions").insert(questions.map((question, index) => ({ duel_id: duelId, question_id: question.id, position: index + 1 }))));
   const duel = unwrap(await db.from("duels").select("*").eq("id", duelId).single());

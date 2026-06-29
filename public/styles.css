@@ -3169,8 +3169,46 @@ select:focus {
   }
 }
 
+/* =========================================================
+   DUEL QUESTION IMAGE
+   Gambar soal hanya tampil kalau image_url benar-benar ada.
+========================================================= */
 
-/* === FP CONTROL FINAL - EDIT DI SINI SAJA === */
+#questionText .question-copy {
+  display: block;
+  width: 100%;
+}
+
+.question-image-wrap {
+  align-items: center;
+  background: rgba(255, 253, 248, 0.72);
+  border: 1px solid rgba(169, 112, 47, 0.18);
+  border-radius: 16px;
+  display: flex;
+  justify-content: center;
+  margin: 0 auto 0.9rem;
+  max-width: 720px;
+  overflow: hidden;
+  padding: 0.55rem;
+  width: 100%;
+}
+
+.question-image-wrap .question-image {
+  border: 0;
+  border-radius: 12px;
+  box-shadow: none;
+  display: block;
+  max-height: min(34vh, 300px);
+  object-fit: contain;
+  width: 100%;
+}
+
+#questionText:not(.has-question-image) {
+  align-content: center;
+}
+
+
+/* === FP CONTROL FINAL - EDIT SINI === */
 
 /* Warna diamond & FP supaya merah, bukan hitam */
 .fp-chip,
@@ -3261,4 +3299,54 @@ select:focus {
 /* Besarkan/kecilkan diamond statistik teman di sini */
 .member-profile-stats .fp-diamond {
   --fp-size: 1em !important;
+}
+
+/* =========================================================
+   RESULT DUEL ONLY - Lifetime FP & Weekly FP
+   Ubah bagian ini saja kalau mau resize angka FP result duel.
+   Tidak mempengaruhi Home, Profile, Member, Leaderboard.
+========================================================= */
+
+/* Kecilkan/besarkan angka Lifetime FP & Weekly FP di result duel */
+.duel-result .duel-result-grid .duel-result-card:nth-child(3) strong,
+.duel-result .duel-result-grid .duel-result-card:nth-child(4) strong {
+  align-items: center !important;
+  color: var(--red) !important;
+  display: inline-flex !important;
+  font-size: clamp(1.15rem, 1.8vw, 1.8rem) !important;
+  font-weight: 1000 !important;
+  justify-content: center !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+
+/* Rapikan chip FP supaya angka dan diamond tidak turun baris */
+.duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-chip,
+.duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-chip {
+  align-items: center !important;
+  color: var(--red) !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0.18em !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+/* Angka FP result duel */
+.duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-value,
+.duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-value {
+  font: inherit !important;
+  line-height: 1 !important;
+}
+
+/* Besarkan/kecilkan diamond FP di result duel */
+.duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-diamond,
+.duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-diamond {
+  --fp-size: 0.9em !important;
+  margin-left: 0.12em !important;
+  top: -0.02em !important;
 }

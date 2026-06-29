@@ -3475,3 +3475,232 @@ select:focus {
   }
 }
 
+
+/* FORGE FP final balance patch
+   Fokus:
+   - Home FP tidak terlalu besar dan tetap di dalam card.
+   - FP di Members lebih terbaca.
+   - Total Poin di Statistik Profil lebih besar.
+   - Diamond CSS konsisten merah, tidak pakai fp.png.
+*/
+.fp-chip {
+  align-items: baseline !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0.16em !important;
+  line-height: 1 !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  width: auto !important;
+}
+
+.fp-chip .fp-value,
+.fp-value {
+  color: inherit !important;
+  font: inherit !important;
+  line-height: 1 !important;
+}
+
+.fp-diamond {
+  --fp-size: 0.62em;
+  background: currentColor !important;
+  clip-path: polygon(50% 0%, 91% 35%, 69% 100%, 31% 100%, 9% 35%) !important;
+  color: inherit !important;
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  height: var(--fp-size) !important;
+  margin-left: 0.08em !important;
+  opacity: 1 !important;
+  position: relative !important;
+  top: -0.045em !important;
+  width: calc(var(--fp-size) * 1.08) !important;
+}
+
+.fp-diamond::after {
+  background: rgba(255, 253, 248, 0.36) !important;
+  clip-path: polygon(50% 0%, 100% 36%, 72% 36%, 50% 100%, 28% 36%, 0 36%) !important;
+  content: "" !important;
+  inset: 0.08em !important;
+  position: absolute !important;
+}
+
+.fp-icon,
+.fp-chip .fp-icon,
+.about-fp-line img,
+.about-fp-name img,
+.about-inline-fp img {
+  display: none !important;
+}
+
+/* HOME: angka FP lebih kecil, rapi, dan tidak keluar card */
+.stat-card.fp-stat {
+  align-content: start !important;
+  display: grid !important;
+  gap: 0.55rem !important;
+  justify-items: start !important;
+  min-height: 148px !important;
+  overflow: hidden !important;
+  padding: clamp(1.15rem, 1.7vw, 1.5rem) !important;
+  text-align: left !important;
+}
+
+.stat-card.fp-stat > span {
+  font-size: clamp(0.82rem, 1vw, 0.95rem) !important;
+  line-height: 1.05 !important;
+  margin: 0 !important;
+}
+
+.stat-card.fp-stat > strong {
+  align-items: baseline !important;
+  color: var(--red) !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  font-size: clamp(1.45rem, 2.05vw, 2.05rem) !important;
+  font-weight: 1000 !important;
+  justify-content: flex-start !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+
+.stat-card.fp-stat .fp-chip {
+  color: var(--red) !important;
+  font-size: 1em !important;
+  font-weight: inherit !important;
+  letter-spacing: inherit !important;
+  max-width: 100% !important;
+}
+
+.stat-card.fp-stat .fp-diamond {
+  --fp-size: 0.48em;
+  flex-shrink: 0 !important;
+  letter-spacing: 0 !important;
+  margin-left: 0.12em !important;
+  top: -0.055em !important;
+}
+
+/* MEMBERS: FP lebih terbaca dan diamond merah konsisten */
+.member-level-cell small {
+  align-items: baseline !important;
+  display: flex !important;
+  line-height: 1 !important;
+  margin-top: 0.12rem !important;
+}
+
+.member-level-cell .fp-chip {
+  color: var(--red) !important;
+  font-size: clamp(1rem, 1.15vw, 1.18rem) !important;
+  font-weight: 1000 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.member-level-cell .fp-diamond {
+  --fp-size: 0.64em;
+  color: var(--red) !important;
+  margin-left: 0.1em !important;
+}
+
+/* Detail profile member di halaman Members */
+.member-profile-stats .fp-chip {
+  color: var(--red) !important;
+  font-size: clamp(1.2rem, 1.45vw, 1.55rem) !important;
+  font-weight: 1000 !important;
+}
+
+.member-profile-stats .fp-diamond {
+  --fp-size: 0.62em;
+  color: var(--red) !important;
+}
+
+/* STATISTIK PROFIL: Total Poin dan FP lain lebih besar */
+.profile-stat-grid strong:has(.fp-chip) {
+  color: var(--red) !important;
+  font-size: clamp(1.7rem, 2.4vw, 2.25rem) !important;
+  font-weight: 1000 !important;
+  line-height: 1 !important;
+}
+
+.profile-stat-grid .fp-chip {
+  color: var(--red) !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  letter-spacing: -0.02em !important;
+}
+
+.profile-stat-grid .fp-diamond {
+  --fp-size: 0.52em;
+  color: var(--red) !important;
+  margin-left: 0.12em !important;
+  top: -0.05em !important;
+}
+
+/* Kalau class profile-total-points sudah ada dari app.js, buat lebih jelas lagi */
+.profile-total-points strong {
+  color: var(--red) !important;
+  font-size: clamp(1.85rem, 2.7vw, 2.45rem) !important;
+  font-weight: 1000 !important;
+  line-height: 1 !important;
+}
+
+.profile-total-points .fp-diamond {
+  --fp-size: 0.52em;
+  color: var(--red) !important;
+}
+
+/* Leaderboard tetap merah, kecuali row akun sendiri yang background merah */
+.leader-row .fp-chip,
+.legend-person .fp-chip,
+.duel-history-item .fp-chip,
+.duel-result-card .fp-chip,
+.profile-pill .fp-chip {
+  color: var(--red) !important;
+}
+
+.leader-row .fp-diamond,
+.legend-person .fp-diamond,
+.duel-history-item .fp-diamond,
+.duel-result-card .fp-diamond,
+.profile-pill .fp-diamond {
+  --fp-size: 0.58em;
+  color: inherit !important;
+}
+
+.leader-row.is-me .fp-chip,
+.leader-row.is-me .fp-diamond {
+  color: #fff7e6 !important;
+}
+
+@media (max-width: 1180px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.35rem, 2.7vw, 1.75rem) !important;
+  }
+
+  .stat-card.fp-stat {
+    min-height: 140px !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.55rem, 7vw, 2rem) !important;
+  }
+
+  .member-level-cell .fp-chip {
+    font-size: 1.05rem !important;
+  }
+
+  .profile-stat-grid strong:has(.fp-chip) {
+    font-size: clamp(1.65rem, 7vw, 2.1rem) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.7rem, 8.6vw, 2.2rem) !important;
+  }
+}
+

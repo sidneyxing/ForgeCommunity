@@ -3208,9 +3208,21 @@ select:focus {
 }
 
 
-/* === FP CONTROL FINAL - EDIT SINI === */
+/* =========================================================
+   FP CONTROL FINAL - EDIT DI SINI
+   Fungsi:
+   - Mengatur warna FP + diamond
+   - Menjaga angka + diamond tetap 1 baris
+   - Mengatur ukuran FP di Home, Profile, Members, dan Result Duel
+========================================================= */
 
-/* Warna diamond & FP supaya merah, bukan hitam */
+
+/* =========================================================
+   0. GLOBAL FP BASE
+   Jangan sering diubah kecuali warna/posisi diamond berubah.
+========================================================= */
+
+/* Warna angka FP dan diamond supaya merah */
 .fp-chip,
 .fp-diamond {
   color: var(--red) !important;
@@ -3218,13 +3230,13 @@ select:focus {
 
 /* Supaya angka + diamond selalu 1 baris, tidak turun */
 .fp-chip {
-  display: inline-flex !important;
   align-items: center !important;
+  display: inline-flex !important;
   flex-wrap: nowrap !important;
   gap: 0.18em !important;
-  white-space: nowrap !important;
   line-height: 1 !important;
   vertical-align: middle !important;
+  white-space: nowrap !important;
 }
 
 .fp-value {
@@ -3232,121 +3244,175 @@ select:focus {
   line-height: 1 !important;
 }
 
-/* Ukuran diamond global */
+/* Ukuran dasar diamond global */
 .fp-diamond {
   --fp-size: 0.82em;
-  display: inline-block !important;
-  width: calc(var(--fp-size) * 1.08) !important;
-  height: var(--fp-size) !important;
-  flex: 0 0 auto !important;
-  margin-left: 0.12em !important;
-  top: 0 !important;
   background: var(--red) !important;
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  height: var(--fp-size) !important;
+  margin-left: 0.12em !important;
+  position: relative !important;
+  top: 0 !important;
+  width: calc(var(--fp-size) * 1.08) !important;
 }
 
 
-/* 1. HOME - FP Mingguan & Lifetime FP */
-/* Kecilkan/besarkan angka Home di sini */
+/* =========================================================
+   1. HOME - FP Mingguan & Lifetime FP
+   Kecilkan/besarkan angka Home di font-size.
+   Kecilkan/besarkan diamond Home di --fp-size.
+========================================================= */
+
 .stat-card.fp-stat > strong {
   font-size: clamp(1.35rem, 1.8vw, 1.8rem) !important;
   line-height: 1 !important;
-  white-space: nowrap !important;
   overflow: visible !important;
+  white-space: nowrap !important;
 }
 
-/* Besarkan/kecilkan diamond Home di sini */
+.stat-card.fp-stat .fp-chip {
+  font-weight: 1000 !important;
+}
+
 .stat-card.fp-stat .fp-diamond {
   --fp-size: 1em !important;
 }
 
 
-/* 2. STATISTIK PROFIL - Total Poin */
-/* Kecilkan/besarkan angka Total Poin di sini */
+/* =========================================================
+   2. STATISTIK PROFIL - Total Poin
+   Kecilkan/besarkan angka Total Poin di font-size.
+   Kecilkan/besarkan diamond Total Poin di --fp-size.
+========================================================= */
+
 .profile-total-points strong,
 .profile-stat-grid strong:has(.fp-chip) {
-  font-size: clamp(1.35rem, 2.0vw, 1.9rem) !important;
+  font-size: clamp(1.35rem, 2vw, 1.9rem) !important;
   line-height: 1 !important;
+  overflow: visible !important;
   white-space: nowrap !important;
 }
 
-/* Besarkan/kecilkan diamond Total Poin di sini */
+.profile-total-points .fp-chip,
+.profile-stat-grid strong:has(.fp-chip) .fp-chip {
+  font-weight: 1000 !important;
+}
+
 .profile-total-points .fp-diamond,
 .profile-stat-grid .fp-diamond {
   --fp-size: 1em !important;
 }
 
 
-/* 3. MEMBERS - list member */
-/* Kecilkan/besarkan angka FP di list members di sini */
+/* =========================================================
+   3. MEMBERS - List Member
+   Kecilkan/besarkan angka FP list member di font-size.
+   Kecilkan/besarkan diamond list member di --fp-size.
+========================================================= */
+
 .member-level-cell .fp-chip {
   font-size: 1.05rem !important;
   font-weight: 1000 !important;
 }
 
-/* Besarkan/kecilkan diamond list members di sini */
 .member-level-cell .fp-diamond {
   --fp-size: 1em !important;
 }
 
 
-/* 4. MEMBERS - profile/statistik teman saat diklik */
-/* Kecilkan/besarkan angka FP di statistik teman di sini */
+/* =========================================================
+   4. MEMBERS - Statistik Teman Saat Diklik
+   Kecilkan/besarkan angka FP statistik teman di font-size.
+   Kecilkan/besarkan diamond statistik teman di --fp-size.
+========================================================= */
+
 .member-profile-stats .fp-chip {
   font-size: 1.25rem !important;
   font-weight: 1000 !important;
 }
 
-/* Besarkan/kecilkan diamond statistik teman di sini */
 .member-profile-stats .fp-diamond {
   --fp-size: 1em !important;
 }
 
+
 /* =========================================================
-   RESULT DUEL ONLY - Lifetime FP & Weekly FP
-   Ubah bagian ini saja kalau mau resize angka FP result duel.
-   Tidak mempengaruhi Home, Profile, Member, Leaderboard.
+   5. RESULT DUEL - Lifetime FP & Weekly FP
+   Ini khusus bagian result setelah duel selesai.
+   Tidak mempengaruhi Home, Profile, Members, atau Leaderboard.
+
+   Card yang diatur:
+   - Card ke-3 = Lifetime FP
+   - Card ke-4 = Weekly FP
 ========================================================= */
 
-/* Kecilkan/besarkan angka Lifetime FP & Weekly FP di result duel */
+/* Kecilkan/besarkan angka Lifetime FP & Weekly FP result duel di sini */
 .duel-result .duel-result-grid .duel-result-card:nth-child(3) strong,
 .duel-result .duel-result-grid .duel-result-card:nth-child(4) strong {
   align-items: center !important;
   color: var(--red) !important;
-  display: inline-flex !important;
-  font-size: clamp(1.15rem, 1.8vw, 1.8rem) !important;
+  display: flex !important;
+  font-size: clamp(1.45rem, 2.25vw, 2.15rem) !important;
   font-weight: 1000 !important;
   justify-content: center !important;
-  letter-spacing: -0.03em !important;
+  letter-spacing: -0.035em !important;
   line-height: 1 !important;
+  margin-top: 0.6rem !important;
   max-width: 100% !important;
+  min-width: 0 !important;
   overflow: visible !important;
+  text-align: center !important;
   white-space: nowrap !important;
+  width: 100% !important;
 }
 
-/* Rapikan chip FP supaya angka dan diamond tidak turun baris */
+/* Rapikan angka + diamond supaya tetap 1 baris di result duel */
 .duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-chip,
 .duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-chip {
   align-items: center !important;
   color: var(--red) !important;
   display: inline-flex !important;
   flex-wrap: nowrap !important;
-  gap: 0.18em !important;
+  font: inherit !important;
+  gap: 0.16em !important;
   justify-content: center !important;
   line-height: 1 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
   white-space: nowrap !important;
 }
 
 /* Angka FP result duel */
 .duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-value,
 .duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-value {
+  display: inline-block !important;
   font: inherit !important;
   line-height: 1 !important;
 }
 
-/* Besarkan/kecilkan diamond FP di result duel */
+/* Kecilkan/besarkan diamond result duel di sini */
 .duel-result .duel-result-grid .duel-result-card:nth-child(3) .fp-diamond,
 .duel-result .duel-result-grid .duel-result-card:nth-child(4) .fp-diamond {
-  --fp-size: 0.9em !important;
+  --fp-size: 1em !important;
+  margin-left: 0.1em !important;
+  top: -0.01em !important;
+}
+
+
+/* =========================================================
+   6. RESULT DUEL - Point Orb Atas
+   Ini angka +FP besar di lingkaran emas result duel.
+   Ubah kalau diamond/angka di coin atas terlalu besar/kecil.
+========================================================= */
+
+.point-orb .fp-chip {
+  font-size: inherit !important;
+  font-weight: 1000 !important;
+}
+
+.point-orb .fp-diamond {
+  --fp-size: 0.78em !important;
   margin-left: 0.12em !important;
   top: -0.02em !important;
 }

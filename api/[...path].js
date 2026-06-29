@@ -57,6 +57,15 @@ export default async function handler(req, res) {
     const method = req.method.toUpperCase();
     const path = resolveApiPath(req);
 
+    if (method === "GET" && path === "/health") {
+  return send(res, 200, {
+    ok: true,
+    supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    resendConfigured: Boolean(process.env.RESEND_API_KEY),
+    sender: process.env.RESET_FROM_ADDRESS || process.env.RESET_FROM_EMAIL || "onboarding@resend.dev",
+  });
+}
+
     if (method === "GET" && path === "/realtime-config") return realtimeConfig(res);
 
     const db = getSupabase();

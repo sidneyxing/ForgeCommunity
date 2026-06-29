@@ -28,6 +28,8 @@ const state = {
   musicMode: "idle",
   pianoLoopTimer: null,
   sounds: {},
+  audioPrimed: false,
+  audioPrimeTimer: null,
   cache: {},
   currentPage: "home",
   realtimeClient: null,
@@ -377,21 +379,63 @@ function activateAudio() {
   setMusicMode(state.musicMode);
 }
 
-function playSound(name, options = {}) {
-  if (state.me && state.me.settings?.sfx_enabled === false) return;
+
+function primeSfxAudioForMobile() {
   activateAudio();
+  if (state.audioPrimed) return;
+  state.audioPrimed = true;
+
+  for (const name of ["button", "notif", "badgeNotif", "duelNotif"]) {
+    const audio = state.sounds[name];
+    if (!audio) continue;
+    audio.load?.();
+  }
+
   if (state.audioContext?.state === "suspended") {
     state.audioContext.resume().catch(() => {});
   }
-  const audio = state.sounds[name];
-  if (audio) {
-    const player = options.overlap ? audio.cloneNode(true) : audio;
-    player.currentTime = 0;
-    player.volume = audio.volume;
-    player.play().catch(() => tone(name));
-  } else {
-    tone(name);
+}
+
+function notificationToneFallback(name) {
+  if (name === "duelNotif") {
+    tone("duelNotif");
+    return;
   }
+  if (name === "badgeNotif") {
+    tone("badgeNotif");
+    return;
+  }
+  tone(name);
+}
+
+function playSound(name, options = {}) {
+  if (state.me && state.me.settings?.sfx_enabled === false) return;
+  activateAudio();
+
+  const resumeAudioContext = () => {
+    if (state.audioContext?.state === "suspended") {
+      return state.audioContext.resume().catch(() => {});
+    }
+    return Promise.resolve();
+  };
+
+  const audio = state.sounds[name];
+  if (!audio) {
+    resumeAudioContext().finally(() => notificationToneFallback(name));
+    return;
+  }
+
+  const player = options.overlap ? audio.cloneNode(true) : audio;
+  player.currentTime = 0;
+  player.volume = options.volume ?? audio.volume;
+
+  resumeAudioContext()
+    .then(() => player.play())
+    .catch(() => {
+      // Mobile browsers sometimes block MP3 playback for async notifications.
+      // Keep a generated fallback so duel/badge notification still has sound.
+      resumeAudioContext().finally(() => notificationToneFallback(name));
+    });
 }
 
 function startBackgroundMusic() {
@@ -452,35 +496,51 @@ function pianoTone(frequency) {
   osc.stop(ctx.currentTime + 1.15);
 }
 
-function tone(name) {
+function playGeneratedTone(frequency, { type = "sine", duration = 0.17, volume = 0.05 } = {}) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
   state.audioContext ||= new AudioContext();
   const ctx = state.audioContext;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
+  osc.frequency.value = frequency;
+  osc.type = type;
+  gain.gain.setValueAtTime(volume, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + duration + 0.01);
+}
+
+function tone(name) {
+  if (name === "duelNotif") {
+    playGeneratedTone(620, { duration: 0.16, volume: 0.062 });
+    window.setTimeout(() => playGeneratedTone(880, { duration: 0.18, volume: 0.058 }), 125);
+    return;
+  }
+  if (name === "badgeNotif") {
+    playGeneratedTone(1180, { duration: 0.15, volume: 0.056 });
+    window.setTimeout(() => playGeneratedTone(1460, { duration: 0.18, volume: 0.044 }), 105);
+    return;
+  }
   const frequency = {
     button: 420,
     tick: 760,
     correct: 920,
     wrong: 160,
     notif: 880,
-    badgeNotif: 1180,
-    duelNotif: 620,
     win: 1040,
     lose: 130,
     duelStart: 560,
     matchBeep: 680,
     matchStart: 980,
   }[name] || 440;
-  osc.frequency.value = frequency;
-  osc.type = name === "lose" || name === "wrong" ? "sawtooth" : "sine";
-  gain.gain.setValueAtTime(0.05, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16);
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.start();
-  osc.stop(ctx.currentTime + 0.17);
+  playGeneratedTone(frequency, {
+    type: name === "lose" || name === "wrong" ? "sawtooth" : "sine",
+    duration: 0.17,
+    volume: 0.05,
+  });
 }
 
 function isTapSoundTarget(target) {
@@ -489,27 +549,38 @@ function isTapSoundTarget(target) {
 
 function playButtonPressSound() {
   const now = performance.now();
-  if (now - Number(state.lastButtonSoundAt || 0) < 140) return;
+  // Wider debounce prevents double sound on mobile when the browser fires
+  // pointer/touch/click around the same tap.
+  if (now - Number(state.lastButtonSoundAt || 0) < 420) return;
   state.lastButtonSoundAt = now;
-  playSound("button", { overlap: true });
+  playSound("button", { overlap: true, volume: 0.72 });
 }
 
-document.addEventListener("pointerdown", (event) => {
-  if (isTapSoundTarget(event.target)) playButtonPressSound();
-}, { capture: true, passive: true });
-
-if (!("PointerEvent" in window)) {
+if ("PointerEvent" in window) {
+  document.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (isTapSoundTarget(event.target)) playButtonPressSound();
+  }, { capture: true, passive: true });
+} else {
   document.addEventListener("touchstart", (event) => {
     if (isTapSoundTarget(event.target)) playButtonPressSound();
   }, { capture: true, passive: true });
+
+  document.addEventListener("click", (event) => {
+    if (isTapSoundTarget(event.target)) playButtonPressSound();
+  }, { capture: true });
 }
 
-document.addEventListener("click", (event) => {
-  if (!isTapSoundTarget(event.target)) return;
-  if (performance.now() - Number(state.lastButtonSoundAt || 0) > 260) playButtonPressSound();
-}, { capture: true });
+function unlockAudioOnFirstGesture() {
+  primeSfxAudioForMobile();
+  startBackgroundMusic();
+}
 
-document.addEventListener("pointerdown", () => startBackgroundMusic(), { once: true, passive: true });
+document.addEventListener("pointerdown", unlockAudioOnFirstGesture, { once: true, passive: true });
+if (!("PointerEvent" in window)) {
+  document.addEventListener("touchstart", unlockAudioOnFirstGesture, { once: true, passive: true });
+}
+
 
 function setAuthTab(tab) {
   $$(".auth-tabs button").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.authTab === tab));
@@ -957,7 +1028,10 @@ async function loadDuelRequests({ notify = false } = {}) {
   }
   state.currentIncomingRequests = requests;
   state.currentOutgoingRequests = outgoing;
-  if (state.currentPage === "members") renderRequests(requests, outgoing);
+  if (state.currentPage === "members") {
+    renderRequests(requests, outgoing);
+    refreshMemberInviteButtons();
+  }
   startRequestCountdownTimer();
   return { ...data, requests, outgoing };
 }
@@ -970,12 +1044,19 @@ function startRequestCountdownTimer() {
   if (!hasPending) return;
   state.requestCountdownTimer = window.setInterval(() => {
     updateInviteToastCountdowns();
-    if (state.currentPage === "members") renderRequests(state.currentIncomingRequests, state.currentOutgoingRequests);
+    if (state.currentPage === "members") {
+      renderRequests(state.currentIncomingRequests, state.currentOutgoingRequests);
+      refreshMemberInviteButtons();
+    }
     const stillPending = [...state.currentIncomingRequests, ...state.currentOutgoingRequests]
       .some((request) => request.status === "pending" && secondsLeft(request) > 0);
     if (!stillPending) {
       clearInterval(state.requestCountdownTimer);
       state.requestCountdownTimer = null;
+      if (state.currentPage === "members") {
+        loadDuelRequests({ notify: false }).catch(() => {});
+        refreshMemberInviteButtons();
+      }
     }
   }, 1000);
 }
@@ -1046,6 +1127,37 @@ function renderCachedMembersForActiveTab() {
   return true;
 }
 
+function refreshMemberInviteButtons() {
+  if (state.currentPage !== "members") return;
+  if (!renderCachedMembersForActiveTab()) return;
+}
+
+function activeOutgoingPendingRequest() {
+  return (state.currentOutgoingRequests || []).find((request) => request.status === "pending" && secondsLeft(request) > 0) || null;
+}
+
+function outgoingPendingForMember(memberId) {
+  return (state.currentOutgoingRequests || []).find((request) => request.status === "pending" && request.target_id === memberId && secondsLeft(request) > 0) || null;
+}
+
+function inviteButtonHtml(member) {
+  if (!member.online) {
+    return `<button class="duel-action" data-invite="${member.id}" disabled>Offline</button>`;
+  }
+
+  const ownPending = outgoingPendingForMember(member.id);
+  if (ownPending) {
+    return `<button class="duel-action is-pending" data-invite="${member.id}" disabled>Pending ${secondsLeft(ownPending)}s</button>`;
+  }
+
+  const anyPending = activeOutgoingPendingRequest();
+  if (anyPending) {
+    return `<button class="duel-action is-pending" data-invite="${member.id}" disabled>Pending ${secondsLeft(anyPending)}s</button>`;
+  }
+
+  return `<button class="duel-action" data-invite="${member.id}">Invite Duel</button>`;
+}
+
 function renderMemberList(members) {
   $("#memberList").innerHTML = members.map((member) => `
     <article class="member-row" data-member='${JSON.stringify(member).replace(/'/g, "&apos;")}' tabindex="0" role="button" aria-label="Lihat profile ${member.username}">
@@ -1057,7 +1169,7 @@ function renderMemberList(members) {
         <button class="heart-action ${member.is_favourite ? "is-on" : ""}" data-relation="favourite" data-id="${member.id}" aria-label="${member.is_favourite ? "Hapus dari favorite" : "Tambah ke favorite"}">
           <span aria-hidden="true">${member.is_favourite ? "&#9829;" : "&#9825;"}</span>
         </button>
-        <button class="duel-action" data-invite="${member.id}" ${member.online ? "" : "disabled"}>${member.online ? "Invite Duel" : "Offline"}</button>
+        ${inviteButtonHtml(member)}
       </div>
     </article>
   `).join("") || `<p class="muted">Belum ada member lain. Daftarkan minimal 2 akun agar Member Arena terisi.</p>`;
@@ -1289,15 +1401,40 @@ async function toggleRelation(button) {
   }
 }
 
-async function inviteDuel(memberId) {
-  await api(`/api/members/${memberId}/invite`, { method: "POST" });
-  state.realtimeClient?.channel(`forge-user-${memberId}`).send({
-    type: "broadcast",
-    event: "duel-invite",
-    payload: { from: state.me.id },
-  }).catch(() => {});
-  await loadDuelRequests({ notify: false }).catch(() => {});
-  toast("Undangan duel terkirim. Menunggu accept 20 detik.");
+async function inviteDuel(memberId, button = null) {
+  if (button?.disabled) return;
+  const pending = activeOutgoingPendingRequest();
+  if (pending) {
+    refreshMemberInviteButtons();
+    return;
+  }
+  const originalText = button?.textContent || "Invite Duel";
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-pending");
+    button.textContent = "Pending 20s";
+  }
+
+  try {
+    const data = await api(`/api/members/${memberId}/invite`, { method: "POST" });
+    if (!data.alreadyPending) {
+      state.realtimeClient?.channel(`forge-user-${memberId}`).send({
+        type: "broadcast",
+        event: "duel-invite",
+        payload: { from: state.me.id },
+      }).catch(() => {});
+    }
+    await loadDuelRequests({ notify: false }).catch(() => {});
+    renderCachedMembersForActiveTab();
+    toast(data.alreadyPending ? "Undangan duel masih pending." : "Undangan duel terkirim. Menunggu accept 20 detik.");
+  } catch (err) {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-pending");
+      button.textContent = originalText;
+    }
+    throw err;
+  }
 }
 
 async function respondDuelRequest(button) {
@@ -2036,7 +2173,7 @@ function bindEvents() {
     const relationBtn = event.target.closest("[data-relation]");
     if (relationBtn) return toggleRelation(relationBtn).catch((err) => toast(err.message));
     const inviteBtn = event.target.closest("[data-invite]");
-    if (inviteBtn) return inviteDuel(inviteBtn.dataset.invite).catch((err) => toast(err.message));
+    if (inviteBtn) return inviteDuel(inviteBtn.dataset.invite, inviteBtn).catch((err) => toast(err.message));
     const row = event.target.closest(".member-row");
     if (row) showMemberProfile(row);
   });

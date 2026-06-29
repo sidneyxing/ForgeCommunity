@@ -4054,3 +4054,34 @@ body.modal-open {
     padding: 0.68rem 0.82rem;
   }
 }
+
+/* =========================================================
+   PATCH: Invite pending countdown + mobile modal close stay visible
+========================================================= */
+.mini-actions .duel-action.is-pending,
+.mini-actions .duel-action.is-waiting {
+  background: linear-gradient(135deg, rgba(244, 208, 111, 0.35), rgba(169, 112, 47, 0.18));
+  border-color: rgba(169, 112, 47, 0.28);
+  color: var(--red);
+  cursor: not-allowed;
+  opacity: 0.88;
+}
+
+.member-profile-dialog .member-profile-close {
+  position: sticky !important;
+  top: calc(env(safe-area-inset-top, 0px) + 0.55rem) !important;
+  right: auto !important;
+  margin-left: auto !important;
+  margin-bottom: -2.7rem !important;
+  z-index: 80 !important;
+}
+
+@media (max-width: 760px) {
+  .member-profile-dialog .member-profile-close {
+    position: sticky !important;
+    top: calc(env(safe-area-inset-top, 0px) + 0.45rem) !important;
+    right: auto !important;
+    margin-left: auto !important;
+    margin-bottom: -2.7rem !important;
+  }
+}

@@ -1048,12 +1048,31 @@ async function inviteDuelRequest(res, db, user, targetId) {
   if (!isRecentlyOnline(target)) return send(res, 400, { error: "Member sedang offline, tidak bisa di-invite duel." });
   const opponentTodayCount = await duelsTodayCount(db, targetId);
   if (opponentTodayCount >= DAILY_DUEL_LIMIT) return send(res, 429, { error: `Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT}/${DAILY_DUEL_LIMIT} hari ini.` });
+
+  // Prevent repeated taps from creating many pending invites and making the UI/server unstable.
+  // While one outgoing invite is still alive, return that invite instead of inserting/refreshing another one.
+  const existingOutgoing = unwrap(await db
+    .from("duel_requests")
+    .select("*")
+    .eq("requester_id", user.id)
+    .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle());
+
+  if (existingOutgoing) {
+    return send(res, 200, {
+      ok: true,
+      alreadyPending: true,
+      request: existingOutgoing,
+      expires_in_ms: Math.max(0, new Date(existingOutgoing.expires_at).getTime() - Date.now()),
+    });
+  }
+
   const expiresAt = new Date(Date.now() + DUEL_REQUEST_WAIT_MS).toISOString();
-  const existing = unwrap(await db.from("duel_requests").select("id, expires_at").eq("requester_id", user.id).eq("target_id", targetId).eq("status", "pending").maybeSingle());
-  const request = existing
-    ? unwrap(await db.from("duel_requests").update({ expires_at: expiresAt, created_at: new Date().toISOString() }).eq("id", existing.id).select("*").single())
-    : unwrap(await db.from("duel_requests").insert({ id: id("req"), requester_id: user.id, target_id: targetId, status: "pending", expires_at: expiresAt }).select("*").single());
-  return send(res, 200, { ok: true, request });
+  const request = unwrap(await db.from("duel_requests").insert({ id: id("req"), requester_id: user.id, target_id: targetId, status: "pending", expires_at: expiresAt }).select("*").single());
+  return send(res, 200, { ok: true, request, expires_in_ms: DUEL_REQUEST_WAIT_MS });
 }
 
 async function duelRequests(res, db, user) {

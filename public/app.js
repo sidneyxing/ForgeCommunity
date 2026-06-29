@@ -21,6 +21,7 @@ const state = {
   questionStartedAt: 0,
   remaining: 10,
   audioReady: false,
+  lastButtonSoundAt: 0,
   audioContext: null,
   backgroundMusic: null,
   duelMusic: null,
@@ -73,6 +74,8 @@ const soundFiles = {
   correct: "/sounds/correct.mp3",
   wrong: "/sounds/wrong.mp3",
   notif: "/sounds/notif.mp3",
+  badgeNotif: "/sounds/badgenotif.mp3",
+  duelNotif: "/sounds/duelnotif.mp3",
   win: "/sounds/win.mp3",
   lose: "/sounds/lose.mp3",
   background: "/sounds/idle.mp3",
@@ -194,7 +197,7 @@ function dismissRichToast(toastId) {
   window.setTimeout(() => toastEl.remove(), 160);
 }
 
-function showRichToast({ type = "info", title = "FORGE", message = "", messageHtml = "", actions = [], autoCloseMs = 5200 } = {}) {
+function showRichToast({ type = "info", title = "FORGE", message = "", messageHtml = "", actions = [], autoCloseMs = 5200, sound = "notif" } = {}) {
   const stack = ensureRichToastStack();
   const toastId = `rt_${++state.richToastSeq}`;
   const toastEl = document.createElement("article");
@@ -233,7 +236,7 @@ function showRichToast({ type = "info", title = "FORGE", message = "", messageHt
   }
 
   stack.prepend(toastEl);
-  playSound("notif", { overlap: true });
+  if (sound) playSound(sound, { overlap: true });
 
   if (autoCloseMs > 0) {
     const timer = window.setTimeout(() => dismissRichToast(toastId), autoCloseMs);
@@ -274,6 +277,7 @@ function showBadgeUnlockNotification(badge = {}) {
     message: badge.name ? `Kamu membuka badge ${badge.name}.` : "Kamu membuka badge baru.",
     actions: [{ label: "Lihat Badge", onClick: () => openBadgeById(badge.id) }],
     autoCloseMs: 9000,
+    sound: "badgeNotif",
   });
 }
 
@@ -287,9 +291,10 @@ function showDuelInviteNotification(request = {}) {
     messageHtml: `@${escapeHtml(request.requester_username || "member")} mengajak kamu duel. <span class="rich-toast-countdown" data-invite-countdown="${escapeHtml(request.id)}">${left > 0 ? `Sisa ${left} detik.` : "Segera respon."}</span>`,
     actions: [
       { label: "Accept", action: "accept", variant: "primary", onClick: () => respondDuelRequestById(request.id, "accept") },
-      { label: "Tolak", action: "decline", variant: "secondary", onClick: () => respondDuelRequestById(request.id, "decline") },
+      { label: "Decline", action: "decline", variant: "secondary", onClick: () => respondDuelRequestById(request.id, "decline") },
     ],
     autoCloseMs: Math.max(4200, (left || 8) * 1000),
+    sound: "duelNotif",
   });
   const toastEl = document.querySelector(`[data-rich-toast-id="${toastId}"]`);
   if (toastEl) {
@@ -303,13 +308,13 @@ function showDuelInviteNotification(request = {}) {
 
 function secondsLeftFromToast(toastEl) {
   if (!toastEl) return 0;
-  if (toastEl.dataset.expiresAt) {
-    return Math.max(0, Math.ceil((new Date(toastEl.dataset.expiresAt).getTime() - Date.now()) / 1000));
-  }
   const expiresInMs = Number(toastEl.dataset.expiresInMs || 0);
   const receivedAtMs = Number(toastEl.dataset.receivedAtMs || Date.now());
   if (Number.isFinite(expiresInMs) && expiresInMs > 0) {
     return Math.max(0, Math.ceil((expiresInMs - (Date.now() - receivedAtMs)) / 1000));
+  }
+  if (toastEl.dataset.expiresAt) {
+    return Math.max(0, Math.ceil((new Date(toastEl.dataset.expiresAt).getTime() - serverNowMs()) / 1000));
   }
   return 0;
 }
@@ -342,12 +347,20 @@ async function respondDuelRequestById(requestId, action = "accept") {
 }
 
 function activateAudio() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (AudioContext) {
+    state.audioContext ||= new AudioContext();
+    if (state.audioContext.state === "suspended") {
+      state.audioContext.resume().catch(() => {});
+    }
+  }
+
   if (state.audioReady) return;
   state.audioReady = true;
-  tone("button");
   for (const [key, src] of Object.entries(soundFiles)) {
     const audio = new Audio(src);
     audio.preload = "auto";
+    audio.setAttribute("playsinline", "");
     if (key === "background") {
       audio.loop = true;
       audio.volume = 0.16;
@@ -356,6 +369,8 @@ function activateAudio() {
       audio.loop = true;
       audio.volume = 0.24;
       state.duelMusic = audio;
+    } else if (key === "badgeNotif" || key === "duelNotif") {
+      audio.volume = 0.78;
     }
     state.sounds[key] = audio;
   }
@@ -450,6 +465,8 @@ function tone(name) {
     correct: 920,
     wrong: 160,
     notif: 880,
+    badgeNotif: 1180,
+    duelNotif: 620,
     win: 1040,
     lose: 130,
     duelStart: 560,
@@ -466,11 +483,33 @@ function tone(name) {
   osc.stop(ctx.currentTime + 0.17);
 }
 
-document.addEventListener("click", (event) => {
-  if (event.target.closest("button, a")) playSound("button");
-});
+function isTapSoundTarget(target) {
+  return Boolean(target?.closest?.("button, a, [role='button'], [data-page], .action-card, .member-row, .badge-tile"));
+}
 
-document.addEventListener("pointerdown", () => startBackgroundMusic(), { once: true });
+function playButtonPressSound() {
+  const now = performance.now();
+  if (now - Number(state.lastButtonSoundAt || 0) < 140) return;
+  state.lastButtonSoundAt = now;
+  playSound("button", { overlap: true });
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (isTapSoundTarget(event.target)) playButtonPressSound();
+}, { capture: true, passive: true });
+
+if (!("PointerEvent" in window)) {
+  document.addEventListener("touchstart", (event) => {
+    if (isTapSoundTarget(event.target)) playButtonPressSound();
+  }, { capture: true, passive: true });
+}
+
+document.addEventListener("click", (event) => {
+  if (!isTapSoundTarget(event.target)) return;
+  if (performance.now() - Number(state.lastButtonSoundAt || 0) > 260) playButtonPressSound();
+}, { capture: true });
+
+document.addEventListener("pointerdown", () => startBackgroundMusic(), { once: true, passive: true });
 
 function setAuthTab(tab) {
   $$(".auth-tabs button").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.authTab === tab));
@@ -874,7 +913,6 @@ async function initRealtime() {
   state.userChannel = state.realtimeClient.channel(`forge-user-${state.me.id}`);
   state.userChannel
     .on("broadcast", { event: "duel-invite" }, () => {
-      toast("Ada undangan duel masuk.");
       loadDuelRequests({ notify: true }).catch(() => {});
     })
     .on("broadcast", { event: "duel-accepted" }, async ({ payload }) => {

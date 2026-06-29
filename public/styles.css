@@ -3797,3 +3797,260 @@ body.modal-open {
     transform: translateY(0) scale(1);
   }
 }
+
+/* =========================================================
+   TOP POPUP NOTIFICATIONS - Badge & Duel Invitation
+   Cream palette, top entrance, live countdown, glossy actions.
+========================================================= */
+.rich-toast-stack {
+  display: grid;
+  gap: 0.78rem;
+  left: 50%;
+  max-height: calc(100vh - 1.5rem);
+  overflow: visible;
+  pointer-events: none;
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
+  transform: translateX(-50%);
+  width: min(440px, calc(100vw - 1.35rem));
+  z-index: 140;
+}
+
+.rich-toast {
+  animation: richToastDrop 320ms cubic-bezier(0.2, 0.95, 0.2, 1) both;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(244, 208, 111, 0.32), transparent 8rem),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(246, 234, 219, 0.98));
+  border: 1px solid rgba(169, 112, 47, 0.28);
+  border-radius: 22px;
+  box-shadow: 0 22px 60px rgba(58, 36, 30, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  color: var(--brown);
+  overflow: hidden;
+  padding: 1rem;
+  pointer-events: auto;
+  position: relative;
+}
+
+.rich-toast::before {
+  background: linear-gradient(90deg, var(--red), var(--gold-2), var(--red));
+  content: "";
+  height: 4px;
+  inset: 0 0 auto;
+  position: absolute;
+}
+
+.rich-toast::after {
+  background: radial-gradient(circle, rgba(155, 17, 30, 0.1), transparent 64%);
+  content: "";
+  height: 150px;
+  pointer-events: none;
+  position: absolute;
+  right: -62px;
+  top: -78px;
+  width: 150px;
+}
+
+.rich-toast.is-leaving {
+  animation: richToastLeave 170ms ease both;
+}
+
+.rich-toast-body {
+  padding-right: 2.2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.rich-toast-body strong {
+  color: var(--red);
+  display: block;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  line-height: 1.05;
+  margin-bottom: 0.35rem;
+}
+
+.rich-toast-body p {
+  color: #4d3c36;
+  font-size: 0.92rem;
+  font-weight: 760;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.rich-toast-countdown {
+  background: rgba(155, 17, 30, 0.08);
+  border: 1px solid rgba(155, 17, 30, 0.14);
+  border-radius: 999px;
+  color: var(--red);
+  display: inline-flex;
+  font-weight: 1000;
+  margin-top: 0.45rem;
+  padding: 0.22rem 0.58rem;
+  white-space: nowrap;
+}
+
+.rich-toast-close {
+  align-items: center;
+  background: rgba(58, 36, 30, 0.08);
+  border: 1px solid rgba(58, 36, 30, 0.12);
+  border-radius: 999px;
+  color: var(--brown);
+  display: inline-flex;
+  font-size: 1.1rem;
+  font-weight: 1000;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 0.75rem;
+  top: 0.72rem;
+  width: 34px;
+  z-index: 2;
+}
+
+.rich-toast-close:hover {
+  background: rgba(155, 17, 30, 0.1);
+  color: var(--red);
+}
+
+.rich-toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+  position: relative;
+  z-index: 1;
+}
+
+.rich-toast-action {
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 1 1 132px;
+  font-weight: 1000;
+  justify-content: center;
+  min-height: 44px;
+  overflow: hidden;
+  padding: 0.72rem 1rem;
+  position: relative;
+  transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+}
+
+.rich-toast-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.rich-toast-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rich-toast-action.primary {
+  background: linear-gradient(135deg, #d63a35 0%, var(--red) 46%, #6f0d15 100%);
+  box-shadow: 0 14px 32px rgba(155, 17, 30, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  color: #fff8e8;
+}
+
+.rich-toast-action.primary::before {
+  animation: glossyButtonSheen 1.9s ease-in-out infinite;
+  background: linear-gradient(110deg, transparent 0 30%, rgba(255, 255, 255, 0.48) 48%, transparent 66%);
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: translateX(-115%);
+}
+
+.rich-toast-action.secondary {
+  background: linear-gradient(135deg, #4b3028, #211714);
+  box-shadow: 0 12px 26px rgba(33, 23, 20, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #fff2e0;
+}
+
+.rich-toast-action span {
+  position: relative;
+  z-index: 1;
+}
+
+.rich-toast-action.is-loading span {
+  opacity: 0.42;
+}
+
+.rich-toast-action.is-loading::after {
+  animation: spin 760ms linear infinite;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  content: "";
+  height: 16px;
+  position: absolute;
+  width: 16px;
+  z-index: 2;
+}
+
+.rich-toast-badge {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(244, 208, 111, 0.45), transparent 8rem),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(248, 226, 176, 0.96));
+}
+
+.rich-toast-duel {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(155, 17, 30, 0.16), transparent 8rem),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(246, 234, 219, 0.98));
+}
+
+@keyframes richToastDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes richToastLeave {
+  to {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.98);
+  }
+}
+
+@keyframes glossyButtonSheen {
+  0%, 42% {
+    transform: translateX(-115%);
+  }
+
+  72%, 100% {
+    transform: translateX(115%);
+  }
+}
+
+@media (max-width: 700px) {
+  .rich-toast-stack {
+    top: calc(env(safe-area-inset-top, 0px) + 0.62rem);
+    width: min(420px, calc(100vw - 0.9rem));
+  }
+
+  .rich-toast {
+    border-radius: 19px;
+    padding: 0.9rem;
+  }
+
+  .rich-toast-body strong {
+    font-size: 1.08rem;
+  }
+
+  .rich-toast-actions {
+    gap: 0.45rem;
+  }
+
+  .rich-toast-action {
+    flex-basis: 112px;
+    min-height: 42px;
+    padding: 0.68rem 0.82rem;
+  }
+}

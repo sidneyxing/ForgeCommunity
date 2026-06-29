@@ -3037,3 +3037,279 @@ select:focus {
     font-size: clamp(2rem, 9vw, 2.75rem) !important;
   }
 }
+
+
+/* FORGE FP diamond + layout fix */
+.fp-chip {
+  align-items: baseline !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0.22em !important;
+  justify-content: flex-start !important;
+  line-height: 1 !important;
+  min-width: 0 !important;
+  vertical-align: baseline !important;
+  white-space: nowrap !important;
+  width: auto !important;
+}
+
+.fp-value {
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+}
+
+.fp-diamond {
+  --fp-size: 0.62em;
+  background: currentColor;
+  clip-path: polygon(50% 0%, 90% 35%, 68% 100%, 32% 100%, 10% 35%);
+  display: inline-block;
+  flex: 0 0 auto;
+  height: var(--fp-size);
+  margin-left: 0.04em;
+  opacity: 0.9;
+  position: relative;
+  top: -0.035em;
+  width: calc(var(--fp-size) * 1.08);
+}
+
+.fp-diamond::after {
+  background: rgba(255, 253, 248, 0.42);
+  clip-path: polygon(50% 0%, 100% 36%, 72% 36%, 50% 100%, 28% 36%, 0 36%);
+  content: "";
+  inset: 0.08em;
+  position: absolute;
+}
+
+.fp-icon,
+.fp-chip .fp-icon,
+.about-fp-line img,
+.about-fp-name img,
+.about-inline-fp img {
+  display: none !important;
+}
+
+.stat-card.fp-stat {
+  align-content: start !important;
+  display: grid !important;
+  gap: 0.65rem !important;
+  justify-items: start !important;
+  min-height: 184px !important;
+  padding: clamp(1.35rem, 2.1vw, 1.9rem) !important;
+  text-align: left !important;
+}
+
+.stat-card.fp-stat > span {
+  line-height: 1.05 !important;
+  margin: 0 !important;
+}
+
+.stat-card.fp-stat > strong {
+  align-items: baseline !important;
+  color: var(--red) !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  font-size: clamp(2.15rem, 4.6vw, 4.15rem) !important;
+  font-weight: 1000 !important;
+  justify-content: flex-start !important;
+  letter-spacing: -0.075em !important;
+  line-height: 0.92 !important;
+  margin-top: 0 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+}
+
+.stat-card.fp-stat .fp-chip {
+  color: var(--red) !important;
+  font-size: 1em !important;
+  font-weight: inherit !important;
+  letter-spacing: inherit !important;
+}
+
+.stat-card.fp-stat .fp-diamond {
+  --fp-size: 0.47em;
+  letter-spacing: 0;
+  margin-left: 0.12em;
+  top: -0.055em;
+}
+
+.profile-pill .fp-diamond,
+.leader-row .fp-diamond,
+.legend-person .fp-diamond,
+.duel-history-item .fp-diamond,
+.duel-result-card .fp-diamond,
+.member-level-cell .fp-diamond,
+.member-profile-stats .fp-diamond,
+.profile-stat-grid .fp-diamond,
+.about-card .fp-diamond {
+  --fp-size: 0.68em;
+}
+
+.about-fp-line,
+.about-fp-name,
+.about-inline-fp {
+  align-items: baseline !important;
+  color: var(--red);
+  display: inline-flex !important;
+  gap: 0.35rem !important;
+  justify-content: flex-start !important;
+  line-height: 1.45 !important;
+  vertical-align: baseline !important;
+  white-space: normal !important;
+}
+
+.about-fp-line {
+  align-items: flex-start !important;
+}
+
+.about-fp-line .fp-diamond,
+.about-fp-name .fp-diamond,
+.about-inline-fp .fp-diamond {
+  --fp-size: 0.82em;
+  color: var(--red);
+  margin-top: 0.25em;
+}
+
+.about-card .fp-chip {
+  color: var(--red) !important;
+  font-weight: 900;
+  min-width: 0 !important;
+  width: auto !important;
+}
+
+.about-card p {
+  align-items: baseline;
+  line-height: 1.5 !important;
+}
+
+@media (min-width: 861px) {
+  .settings-grid {
+    align-items: start !important;
+    gap: 1rem !important;
+    grid-auto-flow: row dense !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  }
+
+  #profileForm.settings-card {
+    align-self: start !important;
+    grid-column: 1 !important;
+    grid-row: 1 / span 2 !important;
+    height: max-content !important;
+  }
+
+  #changePasswordForm.settings-card {
+    align-self: start !important;
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    height: max-content !important;
+    min-height: 0 !important;
+    padding-bottom: 1rem !important;
+  }
+
+  #settingsForm.settings-card {
+    align-self: start !important;
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    height: max-content !important;
+    min-height: 0 !important;
+  }
+
+  .duel-history-card {
+    align-self: start !important;
+    grid-column: 1 !important;
+    grid-row: 3 !important;
+    height: max-content !important;
+    min-height: 0 !important;
+  }
+
+  #profileStats.settings-card {
+    align-self: start !important;
+    grid-column: 2 !important;
+    grid-row: 3 !important;
+    height: max-content !important;
+    min-height: 0 !important;
+  }
+
+  #adminResetPasswordForm.settings-card:not(.is-hidden) {
+    align-self: start !important;
+    grid-column: 2 !important;
+    grid-row: 4 !important;
+    height: max-content !important;
+  }
+}
+
+#changePasswordForm.settings-card label:last-of-type {
+  margin-bottom: 0.7rem !important;
+}
+
+#changePasswordForm .btn {
+  margin-top: 0 !important;
+}
+
+.daily-flame {
+  grid-template-columns: 72px minmax(142px, 1fr) !important;
+  overflow: visible !important;
+}
+
+.daily-flame > div {
+  min-width: 142px !important;
+  overflow: visible !important;
+}
+
+.daily-flame > div > span,
+.daily-flame strong {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+}
+
+.daily-flame strong {
+  font-size: clamp(2.2rem, 2.45vw, 2.85rem) !important;
+  letter-spacing: -0.055em !important;
+}
+
+@media (max-width: 1100px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.85rem, 5.2vw, 3.2rem) !important;
+  }
+
+  .stat-card.fp-stat {
+    min-height: 158px !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .settings-grid {
+    gap: 1rem !important;
+  }
+
+  .stat-card.fp-stat {
+    min-height: 138px !important;
+  }
+
+  .stat-card.fp-stat > strong {
+    font-size: clamp(2rem, 11vw, 3.1rem) !important;
+  }
+
+  .daily-flame {
+    grid-template-columns: 62px minmax(130px, 1fr) !important;
+  }
+
+  .daily-flame > div {
+    min-width: 130px !important;
+  }
+
+  .daily-flame strong {
+    font-size: clamp(2rem, 9vw, 2.65rem) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(2.35rem, 13.5vw, 3.75rem) !important;
+  }
+}

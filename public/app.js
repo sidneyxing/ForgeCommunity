@@ -353,7 +353,7 @@ function fpDisplay(value, { signed = false, label = false } = {}) {
   return `
     <span class="fp-chip" aria-label="${prefix}${number.toLocaleString("id-ID")} Forge Points">
       <span class="fp-value">${prefix}${number.toLocaleString("id-ID")}</span>
-      <img class="fp-icon" src="/image/fp.png" alt="FP" loading="lazy" />
+      <span class="fp-diamond" aria-hidden="true"></span>
       ${label ? `<span class="fp-label">FP</span>` : ""}
     </span>
   `;
@@ -1272,10 +1272,10 @@ function renderAbout() {
   const items = [
     ["Apa itu FORGE", "Foundation Of Resilience, Growth & Excellence: duel arena komunitas untuk menghidupkan interaksi positif."],
     ["Tujuan Komunitas", "Membuat member aktif, saling mengenal, dan bertumbuh lewat pertanyaan berbobot."],
-    ["Forge Points", `<span class="about-fp-line"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span>`],
+    ["Forge Points", `<span class="about-fp-line"><span class="fp-diamond" aria-hidden="true"></span><span>Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span></span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
-    ["Sistem Level", `Level 1 sampai Level 100. Setiap <span class="about-inline-fp"><span>1.000</span><img src="/image/fp.png" alt="FP" loading="lazy" /></span> lifetime naik 1 level.`],
-    ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
+    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
+    ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><span class="fp-diamond" aria-hidden="true"></span>Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
     ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],
     ["Masih Bingung?", "Silakan bertanya atau hubungi admin melalui contact person di footer."],

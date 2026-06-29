@@ -2,7 +2,6 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
 const DAILY_DUEL_LIMIT = 7;
-const LEVEL_FP_REQUIREMENT = 1000;
 const SESSION_STORAGE_KEY = "forge_session_token";
 
 const state = {
@@ -98,11 +97,8 @@ async function api(path, options = {}) {
     payload = {};
   }
   if (!response.ok) {
-    let message = payload.error || payload.message || raw || `Request failed (${response.status})`;
-    if (/FUNCTION_INVOCATION_FAILED|server error has occurred/i.test(message)) {
-      message = "API Vercel gagal dijalankan. Pastikan file api/[...path].js dan api/data.js sudah ada, Environment Variables sudah tersimpan, lalu Redeploy. Cek detailnya di Vercel > Functions > Logs.";
-    }
-    throw new Error(message.length > 260 ? `${message.slice(0, 260)}...` : message);
+    const message = payload.error || payload.message || raw || `Request failed (${response.status})`;
+    throw new Error(message.length > 240 ? `${message.slice(0, 240)}...` : message);
   }
   return payload;
 }
@@ -344,11 +340,11 @@ function applyTheme() {
 }
 
 function levelName(points) {
-  return `Level ${Math.min(100, Math.floor(Number(points || 0) / LEVEL_FP_REQUIREMENT) + 1)}`;
+  return `Level ${Math.min(100, Math.floor(Number(points || 0) / 1000) + 1)}`;
 }
 
 function numericLevel(points) {
-  return Math.min(100, Math.floor(Number(points || 0) / LEVEL_FP_REQUIREMENT) + 1);
+  return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
 }
 
 function fpDisplay(value, { signed = false, label = false } = {}) {
@@ -366,8 +362,8 @@ function fpDisplay(value, { signed = false, label = false } = {}) {
 function levelProgress(points) {
   const level = numericLevel(points);
   const total = Math.max(0, Number(points || 0));
-  const current = level >= 100 ? LEVEL_FP_REQUIREMENT : total % LEVEL_FP_REQUIREMENT;
-  const required = LEVEL_FP_REQUIREMENT;
+  const current = level >= 100 ? 1000 : total % 1000;
+  const required = 1000;
   const percent = level >= 100 ? 100 : Math.max(0, Math.min(100, (current / required) * 100));
   return { level, current, required, percent, nextLevel: Math.min(100, level + 1) };
 }
@@ -868,13 +864,33 @@ function duelHistoryResult(duel = {}) {
 
 function setSettingsCardOrder() {
   const profileCard = $("#profileForm")?.closest(".settings-card");
+  const changePasswordCard = $("#changePasswordForm")?.closest(".settings-card");
   const historyCard = $("#duelHistoryList")?.closest(".settings-card");
   const accountCard = $("#settingsForm")?.closest(".settings-card");
+  const adminResetCard = $("#adminResetPasswordForm")?.closest(".settings-card");
   const statsCard = $("#profileStats");
   if (profileCard) profileCard.style.order = "1";
-  if (historyCard) historyCard.style.order = "2";
-  if (accountCard) accountCard.style.order = "3";
-  if (statsCard) statsCard.style.order = "4";
+  if (changePasswordCard) changePasswordCard.style.order = "2";
+  if (historyCard) historyCard.style.order = "3";
+  if (accountCard) accountCard.style.order = "4";
+  if (adminResetCard) adminResetCard.style.order = "5";
+  if (statsCard) statsCard.style.order = "6";
+}
+
+function isCurrentUserAdmin() {
+  return Boolean(state.me?.is_admin);
+}
+
+function syncAdminResetVisibility() {
+  const form = $("#adminResetPasswordForm");
+  const card = form?.closest(".settings-card");
+  const visible = isCurrentUserAdmin();
+  card?.classList.toggle("is-hidden", !visible);
+  if (form) {
+    Array.from(form.elements).forEach((field) => {
+      field.disabled = !visible;
+    });
+  }
 }
 
 function removeUnusedSettingsToggles() {
@@ -1164,27 +1180,24 @@ function renderLeaderboard(data) {
     </article>
   `).join("") || `<p class="muted">Belum ada data peringkat.</p>`;
 
-  const topList = (title, rows = [], valueFn = () => "-", limit = 1) => {
-    const visibleRows = rows.slice(0, limit);
-    return `
-      <div class="legend-block ${limit === 1 ? "legend-block-single" : ""}">
-        <strong>${title}</strong>
-        ${visibleRows.length ? visibleRows.map((row, index) => `
-          <article class="legend-person">
-            <span class="legend-medal">#${index + 1}</span>
-            <span><b>@${row.username}</b><small>${valueFn(row)}</small></span>
-          </article>
-        `).join("") : `<p class="muted">Belum ada data.</p>`}
-      </div>
-    `;
-  };
+  const topList = (title, rows = [], valueFn = () => "-") => `
+    <div class="legend-block">
+      <strong>${title}</strong>
+      ${rows.length ? rows.map((row, index) => `
+        <article class="legend-person">
+          <span class="legend-medal">#${index + 1}</span>
+          <span><b>@${row.username}</b><small>${valueFn(row)}</small></span>
+        </article>
+      `).join("") : `<p class="muted">Belum ada data.</p>`}
+    </div>
+  `;
 
   $("#hallOfLegends").innerHTML = `
-    ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`, 3)}
-    ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`, 1)}
-    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`, 1)}
-    ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp), 1)}
-    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`, 1)}
+    ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`)}
+    ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
+    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
+    ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
+    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
   `;
 }
 
@@ -1209,17 +1222,13 @@ function renderBadges(data) {
   const badgeDetail = $("#badgeDetail");
   badgeDetail?.classList.add("is-hidden");
   if (badgeDetail) badgeDetail.innerHTML = "";
-  $("#badgeGrid").innerHTML = data.badges.map((badge) => {
-    const unlocked = Boolean(badge.earned_at);
-    const safeBadge = unlocked ? badge : { ...badge, name: "???", description: "Syarat badge masih tersembunyi.", img_url: null };
-    return `
-      <button class="badge-tile ${unlocked ? "" : "locked"}" data-badge='${JSON.stringify(safeBadge).replace(/'/g, "&apos;")}'>
-        <span class="badge-icon">${unlocked ? badgeVisual(badge) : "???"}</span>
-        <strong>${unlocked ? escapeHtml(badge.name) : "???"}</strong>
-        <small>${unlocked ? "Terbuka" : "Terkunci"}</small>
-      </button>
-    `;
-  }).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
+  $("#badgeGrid").innerHTML = data.badges.map((badge) => `
+    <button class="badge-tile ${badge.earned_at ? "" : "locked"}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
+      <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
+      <strong>${badge.name}</strong>
+      <small>${badge.earned_at ? "Terbuka" : "Terkunci"}</small>
+    </button>
+  `).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
 }
 
 function badgeVisual(badge) {
@@ -1232,16 +1241,15 @@ function showBadgeDetail(button) {
   const badge = JSON.parse(button.dataset.badge.replace(/&apos;/g, "'"));
   document.querySelector(".badge-modal")?.remove();
   const earnedAt = badge.earned_at ? formatDateTimeId(badge.earned_at) : null;
-  const unlocked = Boolean(badge.earned_at);
   document.body.insertAdjacentHTML("beforeend", `
     <div class="badge-modal" role="dialog" aria-modal="true">
       <button class="badge-modal-backdrop" type="button" data-badge-close aria-label="Tutup detail badge"></button>
       <article class="badge-modal-card">
         <button class="badge-modal-close" type="button" data-badge-close aria-label="Tutup">x</button>
-        <div class="badge-icon">${unlocked ? badgeVisual(badge) : "???"}</div>
-        <h3>${unlocked ? escapeHtml(badge.name) : "???"}</h3>
-        <p>${unlocked ? escapeHtml(badge.description) : "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya."}</p>
-        <p><strong>Status:</strong> ${unlocked ? "Terbuka" : "Terkunci"}</p>
+        <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
+        <h3>${escapeHtml(badge.name)}</h3>
+        <p>${escapeHtml(badge.description)}</p>
+        <p><strong>Status:</strong> ${badge.earned_at ? "Terbuka" : "Terkunci"}</p>
         ${earnedAt ? `<p><strong>Earned at:</strong> ${earnedAt}</p>` : ""}
       </article>
     </div>
@@ -1262,7 +1270,7 @@ function renderAbout() {
     ["Tujuan Komunitas", "Membuat member aktif, saling mengenal, dan bertumbuh lewat pertanyaan berbobot."],
     ["Forge Points", `<span class="about-fp-line"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
-    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(LEVEL_FP_REQUIREMENT)} lifetime naik 1 level.`],
+    ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
     ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
     ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],
@@ -1285,6 +1293,7 @@ function renderSettings() {
   for (const key of ["music_enabled", "sfx_enabled"]) {
     if (form[key]) form[key].checked = state.me.settings[key] !== false;
   }
+  syncAdminResetVisibility();
   setSettingsCardOrder();
   renderDuelHistory();
   $("#profileStats").innerHTML = `
@@ -1722,33 +1731,56 @@ function bindEvents() {
     }
   });
 
-  $("#resetForm")?.addEventListener("submit", async (event) => {
+  $("#resetForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const target = event.currentTarget;
-    const body = Object.fromEntries(new FormData(target));
-    setBusy(target, true, "Mengirim kode...");
+    toast("Reset email belum aktif. Silakan hubungi WA admin 081392187414.");
+  });
+
+  $("#changePasswordForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const body = Object.fromEntries(new FormData(form));
+    if (String(body.newPassword || "").length < 8) return toast("Password baru minimal 8 karakter.");
+    if (body.newPassword !== body.confirmPassword) return toast("Konfirmasi password baru tidak sama.");
+    if (body.currentPassword === body.newPassword) return toast("Password baru tidak boleh sama dengan password lama.");
+    setBusy(form, true, "Mengganti password...");
     try {
-      await api("/api/auth/reset/request", { method: "POST", body: { email: body.email } });
-      $("#resetConfirmBlock")?.classList.remove("is-hidden");
-      toast("Kode reset sudah dikirim ke email aktif kamu.");
+      const data = await api("/api/me/password", {
+        method: "POST",
+        body: {
+          currentPassword: body.currentPassword,
+          newPassword: body.newPassword,
+          confirmPassword: body.confirmPassword,
+        },
+      });
+      form.reset();
+      toast(data.message || "Password berhasil diganti.");
     } catch (err) {
       toast(err.message);
     } finally {
-      setBusy(target, false);
+      setBusy(form, false);
     }
   });
 
-  $("#confirmResetBtn")?.addEventListener("click", async () => {
-    const form = $("#resetForm");
+  $("#adminResetPasswordForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!isCurrentUserAdmin()) return toast("Fitur ini khusus admin.");
+    const form = event.currentTarget;
     const body = Object.fromEntries(new FormData(form));
-    if (body.password !== body.confirmPassword) return toast("Konfirmasi password baru tidak sama.");
-    setBusy(form, true, "Mengganti password...");
+    if (String(body.newPassword || "").length < 8) return toast("Password baru minimal 8 karakter.");
+    if (body.newPassword !== body.confirmPassword) return toast("Konfirmasi password baru tidak sama.");
+    setBusy(form, true, "Mereset password...");
     try {
-      await api("/api/auth/reset/confirm", { method: "POST", body });
+      const data = await api("/api/admin/reset-password", {
+        method: "POST",
+        body: {
+          adminKey: body.adminKey,
+          identifier: body.identifier,
+          newPassword: body.newPassword,
+        },
+      });
       form.reset();
-      $("#resetConfirmBlock")?.classList.add("is-hidden");
-      setAuthTab("login");
-      toast("Password berhasil diganti. Silakan login.");
+      toast(data.message || "Password user berhasil direset.");
     } catch (err) {
       toast(err.message);
     } finally {

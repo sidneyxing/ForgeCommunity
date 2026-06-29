@@ -932,3 +932,7 @@ const badgeSeeds = [
 export function makeBadgeSeeds() {
   return badgeSeeds;
 }
+
+export default function handler(req, res) {
+  return res.status(404).json({ error: "Data seed module only. Use /api/[...path].js for FORGE API routes." });
+}

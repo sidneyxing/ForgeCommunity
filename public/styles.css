@@ -2874,56 +2874,25 @@ select:focus {
   }
 }
 
-/* Patch: Fire Streak stays inline beside the flame and supports 3-digit days */
-.daily-flame {
-  align-items: center;
-  grid-template-columns: 66px minmax(168px, 1fr);
+.admin-contact-box {
+  background: rgba(255, 253, 248, 0.68);
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  border-radius: 16px;
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem;
 }
 
-.daily-flame > div {
-  min-width: 168px;
+.admin-contact-box strong,
+.admin-reset-card h3 {
+  color: var(--red);
 }
 
-.daily-flame strong {
-  display: block;
-  font-size: clamp(1.85rem, 2.1vw, 2.15rem);
-  letter-spacing: -0.03em;
-  min-width: 9.6rem;
-  white-space: nowrap;
+.admin-reset-card {
+  border-color: rgba(155, 17, 30, 0.18);
 }
 
-.badge-tile.locked .badge-icon {
-  font-size: 1.35rem;
-  font-weight: 1000;
-  letter-spacing: 0.04em;
-}
-
-.badge-tile.locked strong {
-  letter-spacing: 0.08em;
-}
-
-@media (max-width: 860px) {
-  .sidebar {
-    max-width: 310px;
-    width: min(88vw, 310px);
-  }
-
-  .daily-flame {
-    grid-template-columns: 62px minmax(156px, 1fr);
-  }
-
-  .daily-flame-icon {
-    flex-basis: 62px;
-    height: 62px;
-    width: 62px;
-  }
-
-  .daily-flame > div {
-    min-width: 156px;
-  }
-
-  .daily-flame strong {
-    font-size: 1.9rem;
-    min-width: 9rem;
-  }
+.admin-reset-card .btn {
+  width: 100%;
 }

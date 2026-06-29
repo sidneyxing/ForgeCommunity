@@ -58,13 +58,16 @@ export default async function handler(req, res) {
     const path = resolveApiPath(req);
 
     if (method === "GET" && path === "/health") {
-  return send(res, 200, {
-    ok: true,
-    supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
-    resendConfigured: Boolean(process.env.RESEND_API_KEY),
-    sender: process.env.RESET_FROM_ADDRESS || process.env.RESET_FROM_EMAIL || "onboarding@resend.dev",
-  });
-}
+      return send(res, 200, {
+        ok: true,
+        service: "FORGE API",
+        supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+        adminResetConfigured: Boolean(process.env.ADMIN_RESET_KEY),
+        adminUsersConfigured: adminIdentifiers().length > 0,
+        resendConfigured: Boolean(process.env.RESEND_API_KEY),
+        sender: process.env.RESET_FROM_ADDRESS || process.env.RESET_FROM_EMAIL || "onboarding@resend.dev",
+      });
+    }
 
     if (method === "GET" && path === "/realtime-config") return realtimeConfig(res);
 
@@ -75,14 +78,25 @@ export default async function handler(req, res) {
     if (method === "POST" && path === "/auth/register") return register(req, res, db);
     if (method === "POST" && path === "/auth/login") return login(req, res, db);
     if (method === "POST" && path === "/auth/logout") return logout(req, res, db);
+
+    // Kalau nanti sudah beli domain dan domain sender Resend sudah verified,
+    // route reset email ini bisa diaktifkan lagi. Untuk sementara user diarahkan hubungi WA admin.
     if (method === "POST" && path === "/auth/reset/request") return requestPasswordReset(req, res, db);
     if (method === "POST" && path === "/auth/reset/confirm") return confirmPasswordReset(req, res, db);
+
+    // Tool sementara untuk admin reset password tanpa perlu generate hash manual.
+    // Tetap wajib login sebagai admin + mengisi ADMIN_RESET_KEY.
+    if (method === "POST" && path === "/admin/reset-password") {
+      const adminUser = await requireUser(req, db);
+      return adminResetPassword(req, res, db, adminUser);
+    }
 
     await ensureSeedOnce(db);
     await ensureWeeklySeason(db);
 
     const user = await requireUser(req, db);
     if (method === "GET" && path === "/me") return send(res, 200, await mePayload(db, user));
+    if (method === "POST" && path === "/me/password") return changeMyPassword(req, res, db, user);
     if (method === "PATCH" && path === "/me/profile") return updateProfile(req, res, db, user);
     if (method === "PATCH" && path === "/me/settings") return updateSettings(req, res, db, user);
     if (method === "GET" && path === "/members") return members(req, res, db, user);
@@ -522,6 +536,22 @@ function compareBadgesByGroup(a, b) {
   return badgeGroupOrder(a) - badgeGroupOrder(b) || badgeNumber(a) - badgeNumber(b) || String(a.name || "").localeCompare(String(b.name || ""));
 }
 
+function adminIdentifiers() {
+  return String(process.env.ADMIN_USERS || process.env.ADMIN_USERNAMES || process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAdminUser(user = {}) {
+  const allowed = adminIdentifiers();
+  if (!allowed.length) return false;
+  const candidates = [user.id, user.username, user.email, user.given_id]
+    .filter(Boolean)
+    .map((item) => String(item).trim().toLowerCase());
+  return allowed.some((item) => candidates.includes(item));
+}
+
 function normalizeSenderEmail(value = "") {
   return String(value || "").trim().replace(/^['"]|['"]$/g, "");
 }
@@ -606,48 +636,69 @@ async function sendPasswordResetEmail(email, code) {
 }
 
 async function requestPasswordReset(req, res, db) {
-  const email = normalizeEmail(body(req).email);
-  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
-  const user = unwrap(await db.from("users").select("id, email").eq("email", email).maybeSingle());
-  if (!user) return send(res, 404, { error: "Email belum terdaftar di FORGE." });
-  const code = randomResetCode();
-  await db.from("password_reset_codes").delete().eq("user_id", user.id);
-  unwrap(await db.from("password_reset_codes").insert({
-    id: id("reset"),
-    user_id: user.id,
-    code_hash: await digest(code),
-    expires_at: new Date(Date.now() + RESET_CODE_TTL_MS).toISOString(),
-  }));
-  await sendPasswordResetEmail(email, code);
-  return send(res, 200, { ok: true, message: "Kode reset sudah dikirim ke email aktif kamu." });
+  // Kalau nanti sudah beli domain dan domain sender Resend sudah verified,
+  // aktifkan kembali logic kirim kode 6 digit via Resend di sini.
+  // Untuk sementara, reset password dibantu manual oleh admin via WhatsApp.
+  return send(res, 503, {
+    error: "Fitur reset password lewat email belum aktif. Silakan hubungi admin FORGE via WhatsApp 081392187414 untuk bantuan reset password.",
+    disabled: true,
+    contact: "081392187414",
+  });
 }
 
 async function confirmPasswordReset(req, res, db) {
+  // Kalau nanti sudah beli domain, endpoint confirm kode email bisa diaktifkan lagi.
+  return send(res, 503, {
+    error: "Fitur reset password lewat email belum aktif. Silakan hubungi admin FORGE via WhatsApp 081392187414.",
+    disabled: true,
+    contact: "081392187414",
+  });
+}
+
+async function adminResetPassword(req, res, db, adminUser) {
   const data = body(req);
-  const email = normalizeEmail(data.email);
-  const code = String(data.code || "").trim();
-  const password = String(data.password || "");
-  if (!isValidEmail(email)) return send(res, 400, { error: "Email aktif tidak valid." });
-  if (!/^\d{6}$/.test(code)) return send(res, 400, { error: "Kode reset harus 6 digit." });
-  if (password.length < 8) return send(res, 400, { error: "Password baru minimal 8 karakter." });
-  const user = unwrap(await db.from("users").select("id").eq("email", email).maybeSingle());
-  if (!user) return send(res, 404, { error: "Email belum terdaftar di FORGE." });
-  const reset = unwrap(await db
-    .from("password_reset_codes")
-    .select("id, code_hash, expires_at, used_at")
-    .eq("user_id", user.id)
-    .is("used_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle());
-  if (!reset || new Date(reset.expires_at).getTime() <= Date.now()) {
-    return send(res, 400, { error: "Kode reset sudah expired. Silakan kirim kode baru." });
+  const configuredKey = String(process.env.ADMIN_RESET_KEY || "").trim();
+  const adminKey = String(data.adminKey || "").trim();
+  const identifier = String(data.identifier || data.username || data.email || "").trim();
+  const newPassword = String(data.newPassword || data.password || "");
+
+  if (!isAdminUser(adminUser)) {
+    return send(res, 403, { error: "Fitur reset password user hanya untuk akun admin." });
   }
-  if (reset.code_hash !== await digest(code)) return send(res, 400, { error: "Kode reset salah." });
-  unwrap(await db.from("users").update({ password_hash: hashPassword(password) }).eq("id", user.id));
-  unwrap(await db.from("password_reset_codes").update({ used_at: new Date().toISOString() }).eq("id", reset.id));
+  if (!configuredKey) {
+    return send(res, 500, { error: "ADMIN_RESET_KEY belum diisi di Environment Variables Vercel." });
+  }
+  if (!adminKey || await digest(adminKey) !== await digest(configuredKey)) {
+    return send(res, 403, { error: "Admin key salah. Reset password ditolak." });
+  }
+  if (identifier.length < 3) {
+    return send(res, 400, { error: "Isi username, email, atau ID pemain yang valid." });
+  }
+  if (newPassword.length < 8) {
+    return send(res, 400, { error: "Password baru minimal 8 karakter." });
+  }
+
+  const normalizedIdentifier = normalizeEmail(identifier);
+  const usernameIdentifier = identifier.toLowerCase();
+  let user = unwrap(await db.from("users").select("id, username, email, given_id").eq("username", usernameIdentifier).maybeSingle());
+  if (!user && isValidEmail(normalizedIdentifier)) {
+    user = unwrap(await db.from("users").select("id, username, email, given_id").eq("email", normalizedIdentifier).maybeSingle());
+  }
+  if (!user) {
+    user = unwrap(await db.from("users").select("id, username, email, given_id").eq("given_id", identifier).maybeSingle());
+  }
+  if (!user) {
+    return send(res, 404, { error: "Akun tidak ditemukan. Cek lagi username, email, atau ID pemain." });
+  }
+
+  unwrap(await db.from("users").update({ password_hash: hashPassword(newPassword) }).eq("id", user.id));
   await db.from("sessions").delete().eq("user_id", user.id);
-  return send(res, 200, { ok: true, message: "Password berhasil diganti. Silakan login dengan password baru." });
+
+  return send(res, 200, {
+    ok: true,
+    message: `Password @${user.username} berhasil direset. User harus login dengan password baru.`,
+    user: { username: user.username, email: user.email, given_id: user.given_id },
+  });
 }
 
 async function register(req, res, db) {
@@ -776,7 +827,7 @@ async function mePayload(db, user) {
   });
   const { password_hash, ...safeUser } = user;
   return {
-    user: { ...safeUser, settings },
+    user: { ...safeUser, settings, is_admin: isAdminUser(user) },
     dashboard: {
       unlockedBadges: unlocked.count || 0,
       totalBadges: total.count || 0,
@@ -862,6 +913,34 @@ async function cleanupOldWeeklySnapshots(db) {
   // Hall of Legends only needs recent weekly winners.
   // Once a weekly snapshot is older than 2 weeks, remove it automatically.
   await db.from("weekly_rank_snapshots").delete().lt("week_key", daysAgoDate(14));
+}
+
+async function changeMyPassword(req, res, db, user) {
+  const data = body(req);
+  const currentPassword = String(data.currentPassword || data.oldPassword || "");
+  const newPassword = String(data.newPassword || data.password || "");
+  const confirmPassword = String(data.confirmPassword || "");
+
+  if (!currentPassword) return send(res, 400, { error: "Password lama wajib diisi." });
+  if (newPassword.length < 8) return send(res, 400, { error: "Password baru minimal 8 karakter." });
+  if (confirmPassword && newPassword !== confirmPassword) return send(res, 400, { error: "Konfirmasi password baru tidak sama." });
+  if (!verifyPassword(currentPassword, user.password_hash)) {
+    return send(res, 401, { error: "Password lama salah." });
+  }
+  if (verifyPassword(newPassword, user.password_hash)) {
+    return send(res, 400, { error: "Password baru tidak boleh sama dengan password lama." });
+  }
+
+  unwrap(await db.from("users").update({ password_hash: hashPassword(newPassword) }).eq("id", user.id));
+
+  // Tetap pertahankan sesi login saat ini, tapi hapus sesi lama di device lain.
+  const token = bearerToken(req) || cookie(req, "forge_session");
+  if (token) {
+    const tokenHash = await digest(token);
+    await db.from("sessions").delete().eq("user_id", user.id).neq("token_hash", tokenHash);
+  }
+
+  return send(res, 200, { ok: true, message: "Password berhasil diganti." });
 }
 
 async function updateProfile(req, res, db, user) {

@@ -98,24 +98,12 @@
         <form class="auth-panel" id="resetForm">
           <p class="eyebrow">Bantuan akun</p>
           <h1>Lupa Password</h1>
-          <p class="muted">Masukkan email aktif yang terdaftar. FORGE akan mengirim kode reset 6 digit.</p>
-          <label>Email Aktif<input name="email" type="email" autocomplete="email" required placeholder="nama@email.com" /></label>
-          <button class="btn primary full" type="submit">Kirim Kode Reset</button>
-          <div id="resetConfirmBlock" class="reset-confirm is-hidden">
-            <label>Kode Reset<input name="code" inputmode="numeric" maxlength="6" placeholder="6 digit" /></label>
-            <label>Password Baru
-              <span class="password-field">
-                <input name="password" type="password" minlength="8" autocomplete="new-password" />
-                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
-              </span>
-            </label>
-            <label>Konfirmasi Password Baru
-              <span class="password-field">
-                <input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" />
-                <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password"></button>
-              </span>
-            </label>
-            <button class="btn secondary full" type="button" id="confirmResetBtn">Ganti Password</button>
+          <p class="muted">Reset password lewat email sementara belum aktif. Kalau nanti sudah beli domain dan email sender sudah siap, fitur kode reset 6 digit akan diaktifkan lagi.</p>
+          <div class="admin-contact-box">
+            <strong>Hubungi Admin FORGE</strong>
+            <small>Kirim username, email terdaftar, dan ID pemain supaya admin bisa bantu verifikasi akun.</small>
+            <a class="btn primary full" href="https://wa.me/6281392187414?text=Halo%20Admin%20FORGE%2C%20saya%20lupa%20password.%20Username%3A%20%0AEmail%20terdaftar%3A%20%0AID%20Pemain%3A%20" target="_blank" rel="noopener">Hubungi WA Admin</a>
+            <p class="muted">Contact Person: 081392187414</p>
           </div>
           <button class="link-button" type="button" data-auth-tab="login">Kembali ke login</button>
         </form>
@@ -315,6 +303,54 @@
               <button class="btn primary" type="submit">Simpan Pengaturan</button>
               <button class="btn danger" type="button" id="logoutBtn">Logout</button>
               <button class="link-button danger-text" type="button" id="deleteAccountBtn">Hapus akun</button>
+            </form>
+            <form class="settings-card change-password-card" id="changePasswordForm">
+              <h3>Change Password</h3>
+              <p class="muted">Untuk user yang masih bisa login. Masukkan password lama lalu buat password baru.</p>
+              <label>Password Lama
+                <span class="password-field">
+                  <input name="currentPassword" type="password" autocomplete="current-password" required />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password lama"></button>
+                </span>
+              </label>
+              <label>Password Baru
+                <span class="password-field">
+                  <input name="newPassword" type="password" minlength="8" autocomplete="new-password" required placeholder="Minimal 8 karakter" />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password baru"></button>
+                </span>
+              </label>
+              <label>Konfirmasi Password Baru
+                <span class="password-field">
+                  <input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat konfirmasi password"></button>
+                </span>
+              </label>
+              <button class="btn primary" type="submit">Ganti Password</button>
+            </form>
+            <form class="settings-card admin-reset-card is-hidden" id="adminResetPasswordForm">
+              <h3>Admin Reset Password</h3>
+              <p class="muted">Khusus admin. Dipakai sementara sebelum reset password via email aktif.</p>
+              <label>Admin Key
+                <span class="password-field">
+                  <input name="adminKey" type="password" autocomplete="off" required placeholder="ADMIN_RESET_KEY" />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat admin key"></button>
+                </span>
+              </label>
+              <label>Username / Email / ID Pemain<input name="identifier" required placeholder="contoh: budi123" /></label>
+              <label>Password Baru
+                <span class="password-field">
+                  <input name="newPassword" type="password" minlength="8" autocomplete="new-password" required placeholder="Minimal 8 karakter" />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat password baru"></button>
+                </span>
+              </label>
+              <label>Konfirmasi Password Baru
+                <span class="password-field">
+                  <input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required />
+                  <button type="button" class="password-toggle" data-toggle-password aria-label="Lihat konfirmasi password"></button>
+                </span>
+              </label>
+              <button class="btn primary" type="submit">Reset Password User</button>
+              <small>Setelah reset berhasil, sesi login lama user otomatis dihapus.</small>
             </form>
             <article class="settings-card duel-history-card">
               <h3>Riwayat Duel</h3>

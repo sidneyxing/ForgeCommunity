@@ -22,10 +22,10 @@ const RESET_CODE_TTL_MS = 15 * 60 * 1000;
 
 const QUESTION_CATEGORIES = [
   { key: "bible", label: "Alkitab", counter: "bible_correct", aliases: ["alkitab", "bible"] },
-  { key: "character", label: "Moral & Character", counter: "character_correct", aliases: ["moral", "character", "karakter", "refleksi", "kepemimpinan", "situational"] },
+  { key: "character", label: "Karakter & Moral", counter: "character_correct", aliases: ["karakter & moral", "moral & character", "moral", "character", "karakter", "refleksi", "kepemimpinan", "situational"] },
   { key: "technology", label: "Teknologi", counter: "technology_correct", aliases: ["teknologi", "technology", "tech"] },
   { key: "geography", label: "Geografi", counter: "geography_correct", aliases: ["geografi", "geography", "nations", "world"] },
-  { key: "logic", label: "Logika & Matematika", counter: "logic_correct", aliases: ["logika", "matematika", "logic", "math"] },
+  { key: "logic", label: "Logika & Matematika", counter: "logic_correct", aliases: ["logika & matematika", "logika", "matematika", "logic", "math"] },
   { key: "general", label: "Pengetahuan Umum", counter: "general_correct", aliases: ["pengetahuan umum", "general", "knowledge", "umum"] },
   { key: "health", label: "Kesehatan", counter: "health_correct", aliases: ["kesehatan", "health", "medical", "wellness"] },
   { key: "psychology", label: "Psikologi", counter: "psychology_correct", aliases: ["psikologi", "psychology", "komunikasi", "mind"] },
@@ -1195,27 +1195,19 @@ async function startDuel(res, db, user) {
 }
 
 async function joinMatchmaking(db, user) {
-  const questions = await dailyDuelQuestions(db);
-  if (questions.length < DUEL_QUESTION_COUNT) {
-    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
-  }
-
+  // Question selection is now owned by the database RPC.
+  // This keeps the frontend/API from accidentally bypassing the daily 50-question pool.
   const rpcResult = await db.rpc("match_duel_queue", {
     p_user_id: user.id,
-    p_question_ids: questions.map((question) => question.id),
+    p_question_ids: [],
     p_day_start: startOfTodayIso(),
     p_daily_limit: DAILY_DUEL_LIMIT,
   });
+
   if (rpcResult.error) {
-    const message = String(rpcResult.error.message || "");
-    if (message.includes("LIMIT_REACHED")) {
-      throw Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
-    }
-    if (message.includes("QUESTION_POOL_NOT_READY")) {
-      throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
-    }
-    throw rpcResult.error;
+    throw normalizeDuelPoolError(rpcResult.error);
   }
+
   const result = rpcResult.data;
   const match = Array.isArray(result) ? result[0] : result;
 
@@ -1229,6 +1221,28 @@ async function joinMatchmaking(db, user) {
 
   const duel = unwrap(await db.from("duels").select("*").eq("id", match.duel_id).single());
   return { duel: await duelPayload(db, duel, user.id) };
+}
+
+function normalizeDuelPoolError(error) {
+  const message = String(error?.message || "");
+
+  if (message.includes("LIMIT_REACHED")) {
+    return Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
+  }
+
+  if (message.includes("QUESTION_POOL_NOT_READY") || message.includes("DAILY_POOL_GENERATION_FAILED")) {
+    return Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
+  }
+
+  if (message.includes("NOT_ENOUGH_ACTIVE_QUESTIONS")) {
+    return Object.assign(new Error(`Stok soal harian belum cukup. Pastikan setiap kategori punya minimal ${DAILY_CATEGORY_QUESTION_COUNT} soal aktif.`), { status: 400 });
+  }
+
+  if (message.includes("DAILY_POOL_INCOMPLETE")) {
+    return Object.assign(new Error("Daily question pool hari ini belum lengkap. Jalankan ulang generate_daily_question_pool atau coba start duel sekali lagi."), { status: 500 });
+  }
+
+  return error;
 }
 
 async function matchmakingStatus(res, db, user) {
@@ -1283,68 +1297,37 @@ async function duelStatus(res, db, user, duelId) {
 }
 
 async function ensureDailyQuestionPool(db, force = false) {
-  const poolDate = todayDate();
-  await db.from("daily_question_pool").delete().neq("pool_date", poolDate);
+  // Self-healing daily pool.
+  // The database function creates 50 questions/day: 10 categories x 5 questions.
+  // When a question enters a pool, questions.used_in_pool becomes true, but active stays true for admin control.
+  const result = await db.rpc("generate_daily_question_pool", {
+    p_pool_date: todayDate(),
+    p_per_category: DAILY_CATEGORY_QUESTION_COUNT,
+    p_force_regenerate: Boolean(force),
+  });
 
-  const existing = await db
-    .from("daily_question_pool")
-    .select("question_id", { count: "exact", head: true })
-    .eq("pool_date", poolDate);
-
-  const targetPoolSize = QUESTION_CATEGORIES.length * DAILY_CATEGORY_QUESTION_COUNT;
-  if (!force && (existing.count || 0) >= targetPoolSize) return;
-
-  unwrap(await db.from("daily_question_pool").delete().eq("pool_date", poolDate));
-
-  const activeQuestions = unwrap(await db
-    .from("questions")
-    .select("id, category")
-    .eq("active", true)
-    .limit(5000));
-
-  const grouped = new Map(QUESTION_CATEGORIES.map((category) => [category.key, []]));
-  for (const question of activeQuestions) {
-    const key = categoryKeyFor(question.category);
-    if (key && grouped.has(key)) grouped.get(key).push(question);
+  if (result.error) {
+    throw normalizeDuelPoolError(result.error);
   }
 
-  const missing = QUESTION_CATEGORIES
-    .filter((category) => (grouped.get(category.key)?.length || 0) < DAILY_CATEGORY_QUESTION_COUNT)
-    .map((category) => `${category.label} (${grouped.get(category.key)?.length || 0}/${DAILY_CATEGORY_QUESTION_COUNT})`);
-  if (missing.length) {
-    throw Object.assign(new Error(`Stok soal aktif kurang. Minimal ${DAILY_CATEGORY_QUESTION_COUNT} soal aktif per kategori: ${missing.join(", ")}.`), { status: 400 });
-  }
-
-  const selected = QUESTION_CATEGORIES.flatMap((category) => (
-    shuffle(grouped.get(category.key)).slice(0, DAILY_CATEGORY_QUESTION_COUNT).map((question) => ({
-      pool_date: poolDate,
-      category_key: category.key,
-      question_id: question.id,
-    }))
-  ));
-
-  unwrap(await db.from("daily_question_pool").insert(selected));
-  const selectedIds = selected.map((row) => row.question_id);
-  unwrap(await db.from("questions").update({ active: false }).in("id", selectedIds).select("id"));
+  return Number(result.data || 0);
 }
 
 async function dailyDuelQuestions(db) {
-  await ensureDailyQuestionPool(db);
-  const poolDate = todayDate();
-  let poolRows = unwrap(await db
-    .from("daily_question_pool")
-    .select("question_id")
-    .eq("pool_date", poolDate));
+  const result = await db.rpc("get_daily_duel_question_ids", {
+    p_pool_date: todayDate(),
+    p_limit: DUEL_QUESTION_COUNT,
+  });
 
-  if (poolRows.length < DUEL_QUESTION_COUNT) {
-    await ensureDailyQuestionPool(db, true);
-    poolRows = unwrap(await db
-      .from("daily_question_pool")
-      .select("question_id")
-      .eq("pool_date", poolDate));
+  if (result.error) {
+    throw normalizeDuelPoolError(result.error);
   }
 
-  const selectedIds = shuffle(poolRows).slice(0, DUEL_QUESTION_COUNT).map((row) => row.question_id);
+  const selectedIds = Array.isArray(result.data) ? result.data : [];
+  if (selectedIds.length < DUEL_QUESTION_COUNT) {
+    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
+  }
+
   const rows = unwrap(await db.from("questions").select("*").in("id", selectedIds));
   const byId = new Map(rows.map((question) => [question.id, question]));
   return selectedIds.map((questionId) => byId.get(questionId)).filter(Boolean);

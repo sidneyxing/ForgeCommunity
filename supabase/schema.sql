@@ -90,13 +90,16 @@ create table if not exists public.questions (
   correct_option text not null check (correct_option in ('A', 'B', 'C', 'D')),
   image_url text,
   question_type text not null default 'text' check (question_type in ('text', 'image')),
-  active boolean not null default true
+  active boolean not null default true,
+  used_in_pool boolean not null default false,
+  last_pooled_date date
 );
 
 create table if not exists public.daily_question_pool (
   pool_date date not null,
   category_key text not null default '',
   question_id text not null references public.questions(id) on delete cascade,
+  created_at timestamptz not null default now(),
   primary key (pool_date, question_id)
 );
 
@@ -185,6 +188,7 @@ create unique index if not exists idx_users_lower_email on public.users (lower(e
 create index if not exists idx_questions_active on public.questions (active, category);
 create index if not exists idx_daily_question_pool_date on public.daily_question_pool (pool_date);
 create index if not exists idx_daily_question_pool_date_category on public.daily_question_pool (pool_date, category_key);
+create index if not exists idx_daily_question_pool_question on public.daily_question_pool (question_id);
 create index if not exists idx_duels_user_started on public.duels (user_id, started_at desc);
 create index if not exists idx_duels_opponent_started on public.duels (opponent_id, started_at desc);
 create index if not exists idx_duels_started_status on public.duels (started_at desc, status);
@@ -215,10 +219,288 @@ alter table public.badges enable row level security;
 alter table public.user_badges enable row level security;
 alter table public.weekly_rank_snapshots enable row level security;
 
+-- Daily question pool helper.
+-- Target: 10 FORGE categories x 5 questions/category = 50 questions/day.
+-- active = admin control. used_in_pool = rotation marker.
+create or replace function public.forge_daily_categories()
+returns table(category_key text, sort_order integer)
+language sql
+stable
+as $$
+  values
+    ('Logika & Matematika'::text, 1),
+    ('Geografi'::text, 2),
+    ('Teknologi'::text, 3),
+    ('Pengetahuan Umum'::text, 4),
+    ('Kesehatan'::text, 5),
+    ('Psikologi'::text, 6),
+    ('Karakter & Moral'::text, 7),
+    ('Ekonomi'::text, 8),
+    ('Alkitab'::text, 9),
+    ('Bahasa Inggris'::text, 10);
+$$;
+
+create or replace function public.forge_question_category_key(p_category text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when lower(trim(coalesce(p_category, ''))) in ('logika & matematika', 'logika dan matematika')
+      or lower(coalesce(p_category, '')) like '%logika%'
+      or lower(coalesce(p_category, '')) like '%matematika%'
+      or lower(coalesce(p_category, '')) like '%logic%'
+      or lower(coalesce(p_category, '')) like '%math%'
+      then 'Logika & Matematika'
+    when lower(coalesce(p_category, '')) like '%geografi%'
+      or lower(coalesce(p_category, '')) like '%geography%'
+      or lower(coalesce(p_category, '')) like '%nations%'
+      then 'Geografi'
+    when lower(coalesce(p_category, '')) like '%teknologi%'
+      or lower(coalesce(p_category, '')) like '%technology%'
+      or lower(coalesce(p_category, '')) like '%tech%'
+      then 'Teknologi'
+    when lower(coalesce(p_category, '')) like '%pengetahuan umum%'
+      or lower(coalesce(p_category, '')) like '%general%'
+      or lower(coalesce(p_category, '')) like '%knowledge%'
+      or lower(coalesce(p_category, '')) like '%sains%'
+      or lower(coalesce(p_category, '')) like '%sejarah%'
+      then 'Pengetahuan Umum'
+    when lower(coalesce(p_category, '')) like '%kesehatan%'
+      or lower(coalesce(p_category, '')) like '%health%'
+      or lower(coalesce(p_category, '')) like '%medical%'
+      or lower(coalesce(p_category, '')) like '%wellness%'
+      then 'Kesehatan'
+    when lower(coalesce(p_category, '')) like '%psikologi%'
+      or lower(coalesce(p_category, '')) like '%psychology%'
+      or lower(coalesce(p_category, '')) like '%komunikasi%'
+      or lower(coalesce(p_category, '')) like '%mind%'
+      then 'Psikologi'
+    when lower(coalesce(p_category, '')) like '%karakter%'
+      or lower(coalesce(p_category, '')) like '%moral%'
+      or lower(coalesce(p_category, '')) like '%character%'
+      or lower(coalesce(p_category, '')) like '%refleksi%'
+      or lower(coalesce(p_category, '')) like '%kepemimpinan%'
+      or lower(coalesce(p_category, '')) like '%situational%'
+      or lower(coalesce(p_category, '')) like '%leadership%'
+      then 'Karakter & Moral'
+    when lower(coalesce(p_category, '')) like '%ekonomi%'
+      or lower(coalesce(p_category, '')) like '%economy%'
+      or lower(coalesce(p_category, '')) like '%keuangan%'
+      or lower(coalesce(p_category, '')) like '%finance%'
+      or lower(coalesce(p_category, '')) like '%financial%'
+      then 'Ekonomi'
+    when lower(coalesce(p_category, '')) like '%alkitab%'
+      or lower(coalesce(p_category, '')) like '%bible%'
+      then 'Alkitab'
+    when lower(coalesce(p_category, '')) like '%bahasa inggris%'
+      or lower(coalesce(p_category, '')) like '%english%'
+      or lower(coalesce(p_category, '')) like '%grammar%'
+      or lower(coalesce(p_category, '')) like '%vocabulary%'
+      then 'Bahasa Inggris'
+    else null
+  end;
+$$;
+
+drop function if exists public.get_daily_duel_question_ids(date, integer);
+drop function if exists public.generate_daily_question_pool(date, integer);
+drop function if exists public.generate_daily_question_pool(date, integer, boolean);
+
+create or replace function public.reset_used_in_pool_if_exhausted(p_per_category integer default 5)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_missing_count integer;
+begin
+  select count(*)
+    into v_missing_count
+    from public.forge_daily_categories() c
+    left join (
+      select public.forge_question_category_key(category) as category_key, count(*) as available
+        from public.questions
+       where active = true
+         and used_in_pool = false
+       group by public.forge_question_category_key(category)
+    ) a on a.category_key = c.category_key
+   where coalesce(a.available, 0) < p_per_category;
+
+  if v_missing_count = 0 then
+    return false;
+  end if;
+
+  update public.questions
+     set used_in_pool = false,
+         last_pooled_date = null
+   where active = true;
+
+  return true;
+end;
+$$;
+
+create or replace function public.generate_daily_question_pool(
+  p_pool_date date default (now() at time zone 'Asia/Makassar')::date,
+  p_per_category integer default 5,
+  p_force_regenerate boolean default false
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_category_count integer;
+  v_expected integer;
+  v_existing integer;
+  v_inserted integer;
+  v_missing text;
+begin
+  if p_pool_date is null then
+    raise exception 'POOL_DATE_REQUIRED';
+  end if;
+
+  if p_per_category <= 0 then
+    raise exception 'PER_CATEGORY_MUST_BE_POSITIVE';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('forge_daily_question_pool_' || p_pool_date::text));
+
+  select count(*) into v_category_count from public.forge_daily_categories();
+  v_expected := v_category_count * p_per_category;
+
+  select count(*) into v_existing
+    from public.daily_question_pool
+   where pool_date = p_pool_date;
+
+  if not p_force_regenerate and v_existing >= v_expected then
+    return v_existing;
+  end if;
+
+  if p_force_regenerate or (v_existing > 0 and v_existing < v_expected) then
+    update public.questions q
+       set used_in_pool = false,
+           last_pooled_date = null
+      from public.daily_question_pool d
+     where d.pool_date = p_pool_date
+       and d.question_id = q.id
+       and q.last_pooled_date = p_pool_date;
+
+    delete from public.daily_question_pool
+     where pool_date = p_pool_date;
+  end if;
+
+  -- If the unused stock is exhausted, start a new rotation cycle automatically.
+  perform public.reset_used_in_pool_if_exhausted(p_per_category);
+
+  select string_agg(c.category_key || ' tersedia ' || coalesce(a.available, 0)::text || ' soal aktif belum pernah masuk pool', '; ' order by c.sort_order)
+    into v_missing
+    from public.forge_daily_categories() c
+    left join (
+      select public.forge_question_category_key(category) as category_key, count(*) as available
+        from public.questions
+       where active = true
+         and used_in_pool = false
+         and public.forge_question_category_key(category) is not null
+       group by public.forge_question_category_key(category)
+    ) a on a.category_key = c.category_key
+   where coalesce(a.available, 0) < p_per_category;
+
+  if v_missing is not null then
+    raise exception 'NOT_ENOUGH_ACTIVE_QUESTIONS: %', v_missing;
+  end if;
+
+  with picked as (
+    select id, category_key
+      from (
+        select
+          q.id,
+          public.forge_question_category_key(q.category) as category_key,
+          row_number() over (partition by public.forge_question_category_key(q.category) order by random()) as rn
+        from public.questions q
+        join public.forge_daily_categories() c
+          on c.category_key = public.forge_question_category_key(q.category)
+       where q.active = true
+         and q.used_in_pool = false
+      ) ranked
+     where rn <= p_per_category
+  ), inserted as (
+    insert into public.daily_question_pool (pool_date, category_key, question_id)
+    select p_pool_date, category_key, id
+      from picked
+    returning question_id
+  )
+  update public.questions q
+     set used_in_pool = true,
+         last_pooled_date = p_pool_date
+    from inserted i
+   where q.id = i.question_id;
+
+  get diagnostics v_inserted = row_count;
+
+  if v_inserted <> v_expected then
+    raise exception 'DAILY_POOL_GENERATION_FAILED: expected %, inserted %', v_expected, v_inserted;
+  end if;
+
+  return v_inserted;
+end;
+$$;
+
+create or replace function public.get_daily_duel_question_ids(
+  p_pool_date date default (now() at time zone 'Asia/Makassar')::date,
+  p_limit integer default 5
+)
+returns text[]
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_question_ids text[];
+  v_pool_count integer;
+begin
+  if p_pool_date is null then
+    raise exception 'POOL_DATE_REQUIRED';
+  end if;
+
+  if p_limit <= 0 then
+    raise exception 'QUESTION_LIMIT_MUST_BE_POSITIVE';
+  end if;
+
+  perform public.generate_daily_question_pool(p_pool_date, 5, false);
+
+  select count(*) into v_pool_count
+    from public.daily_question_pool
+   where pool_date = p_pool_date;
+
+  if v_pool_count < p_limit then
+    raise exception 'QUESTION_POOL_NOT_READY: only % questions available', v_pool_count;
+  end if;
+
+  select array_agg(question_id order by picked_order)
+    into v_question_ids
+    from (
+      select question_id,
+             row_number() over (order by random()) as picked_order
+        from public.daily_question_pool
+       where pool_date = p_pool_date
+       order by random()
+       limit p_limit
+    ) picked;
+
+  if coalesce(array_length(v_question_ids, 1), 0) < p_limit then
+    raise exception 'QUESTION_POOL_NOT_READY';
+  end if;
+
+  return v_question_ids;
+end;
+$$;
+
 create or replace function public.match_duel_queue(
   p_user_id text,
-  p_question_ids text[],
-  p_day_start timestamptz,
+  p_question_ids text[] default array[]::text[],
+  p_day_start timestamptz default date_trunc('day', now()),
   p_daily_limit integer default 7
 )
 returns table(matched boolean, duel_id text)
@@ -232,7 +514,12 @@ declare
   v_opponent_id text;
   v_question_count integer;
   v_user_today integer;
+  v_pool_date date;
 begin
+  -- Asia/Makassar keeps FORGE's Sulut daily rotation aligned with local midnight.
+  v_pool_date := coalesce((p_day_start at time zone 'Asia/Makassar')::date, (now() at time zone 'Asia/Makassar')::date);
+  p_question_ids := public.get_daily_duel_question_ids(v_pool_date, 5);
+
   v_question_count := coalesce(array_length(p_question_ids, 1), 0);
   if v_question_count < 5 then
     raise exception 'QUESTION_POOL_NOT_READY';
@@ -240,8 +527,7 @@ begin
 
   perform pg_advisory_xact_lock(hashtext('forge_duel_queue_matchmaking'));
 
-  select count(*)
-    into v_user_today
+  select count(*) into v_user_today
     from public.duels
    where status <> 'cancelled'
      and started_at >= p_day_start
@@ -251,18 +537,14 @@ begin
     raise exception 'LIMIT_REACHED';
   end if;
 
-  update public.users
-     set last_seen_at = now()
-   where id = p_user_id;
+  update public.users set last_seen_at = now() where id = p_user_id;
 
   update public.duel_queue
-     set status = 'cancelled',
-         updated_at = now()
+     set status = 'cancelled', updated_at = now()
    where (status = 'waiting' and last_seen_at < now() - interval '15 seconds')
       or (status = 'matched' and updated_at < now() - interval '2 minutes');
 
-  select q.duel_id
-    into v_existing_duel_id
+  select q.duel_id into v_existing_duel_id
     from public.duel_queue q
     join public.duels d on d.id = q.duel_id
    where q.user_id = p_user_id
@@ -278,15 +560,11 @@ begin
   insert into public.duel_queue (user_id, status, duel_id, last_seen_at, updated_at)
   values (p_user_id, 'waiting', null, now(), now())
   on conflict (user_id) do update
-     set status = 'waiting',
-         duel_id = null,
-         last_seen_at = now(),
-         updated_at = now()
+     set status = 'waiting', duel_id = null, last_seen_at = now(), updated_at = now()
    where public.duel_queue.status <> 'matched'
       or public.duel_queue.updated_at < now() - interval '2 minutes';
 
-  select q.user_id
-    into v_opponent_id
+  select q.user_id into v_opponent_id
     from public.duel_queue q
     join public.users u on u.id = q.user_id
    where q.status = 'waiting'
@@ -311,36 +589,18 @@ begin
 
   v_duel_id := 'duel_' || replace(gen_random_uuid()::text, '-', '');
 
-  insert into public.duels (
-    id,
-    user_id,
-    opponent_id,
-    opponent_name,
-    status,
-    started_at,
-    starts_at
-  )
-  select
-    v_duel_id,
-    p_user_id,
-    u.id,
-    u.username,
-    'active',
-    now(),
-    now() + interval '3 seconds'
-  from public.users u
-  where u.id = v_opponent_id;
+  insert into public.duels (id, user_id, opponent_id, opponent_name, status, started_at, starts_at)
+  select v_duel_id, p_user_id, u.id, u.username, 'active', now(), now() + interval '3 seconds'
+    from public.users u
+   where u.id = v_opponent_id;
 
   insert into public.duel_questions (duel_id, question_id, position)
   select v_duel_id, question_id, position
-  from unnest(p_question_ids) with ordinality as picked(question_id, position)
-  where position <= 5;
+    from unnest(p_question_ids) with ordinality as picked(question_id, position)
+   where position <= 5;
 
   update public.duel_queue
-     set status = 'matched',
-         duel_id = v_duel_id,
-         updated_at = now(),
-         last_seen_at = now()
+     set status = 'matched', duel_id = v_duel_id, updated_at = now(), last_seen_at = now()
    where user_id in (p_user_id, v_opponent_id);
 
   return query select true, v_duel_id;

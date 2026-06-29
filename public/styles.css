@@ -3704,3 +3704,30 @@ select:focus {
   }
 }
 
+
+/* FORGE diamond size only patch - jangan ubah font angka */
+.stat-card.fp-stat .fp-diamond {
+  --fp-size: 0.62em !important;
+  margin-left: 0.18em !important;
+  top: -0.05em !important;
+}
+
+.profile-total-points .fp-diamond,
+.profile-stat-grid .fp-diamond {
+  --fp-size: 0.66em !important;
+  margin-left: 0.18em !important;
+  top: -0.05em !important;
+}
+
+.member-level-cell .fp-diamond,
+.member-profile-stats .fp-diamond {
+  --fp-size: 0.72em !important;
+  margin-left: 0.16em !important;
+  top: -0.04em !important;
+}
+
+.leader-row .fp-diamond,
+.legend-person .fp-diamond {
+  --fp-size: 0.66em !important;
+}
+

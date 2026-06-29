@@ -255,19 +255,9 @@ function tone(name) {
   const ctx = state.audioContext;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  if (name === "tick") {
-    osc.frequency.value = 1250;
-    osc.type = "square";
-    gain.gain.setValueAtTime(0.018, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + 0.035);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.04);
-    return;
-  }
   const frequency = {
     button: 420,
+    tick: 760,
     correct: 920,
     wrong: 160,
     notif: 880,
@@ -355,10 +345,6 @@ function levelName(points) {
 
 function numericLevel(points) {
   return Math.min(100, Math.floor(Number(points || 0) / 1000) + 1);
-}
-
-function statClass(label = "") {
-  return `stat-${String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 }
 
 function fpDisplay(value, { signed = false, label = false } = {}) {
@@ -492,16 +478,16 @@ function resetDuelProgress(duel) {
 
 function renderDuelProgress() {
   const total = state.duel?.questions?.length || 5;
-  const activeIndex = Math.min(state.duelIndex, total - 1);
   const userDone = state.duelUserAnswers.filter((value) => value !== null).length;
   const opponentDone = Math.min(state.duelOpponentAnsweredCount, total);
   const userCorrect = state.duelUserAnswers.filter((value) => value === true).length;
-  const opponentVisible = state.duelOpponentAnswers.slice(0, opponentDone);
+  const opponentVisible = state.duelOpponentAnswers.slice(0, total).filter((value) => value !== null);
   const opponentCorrect = opponentVisible.filter((value) => value === true).length;
-  const opponentActiveIndex = Math.min(opponentDone, total - 1);
-  $("#duelUserScore").textContent = `${userCorrect} benar · Soal ${Math.min(userDone + 1, total)}/${total}`;
-  $("#duelOpponentScore").textContent = `${opponentCorrect} benar · Soal ${Math.min(opponentDone + 1, total)}/${total}`;
-  renderScoreBars($("#duelUserBars"), state.duelUserAnswers, activeIndex);
+  const userActiveIndex = userDone >= total ? -1 : Math.min(userDone, total - 1);
+  const opponentActiveIndex = opponentDone >= total ? -1 : Math.min(opponentDone, total - 1);
+  $("#duelUserScore").textContent = `${userCorrect} benar · Soal ${userDone >= total ? total : userDone + 1}/${total}`;
+  $("#duelOpponentScore").textContent = `${opponentCorrect} benar · Soal ${opponentDone >= total ? total : opponentDone + 1}/${total}`;
+  renderScoreBars($("#duelUserBars"), state.duelUserAnswers, userActiveIndex);
   renderScoreBars($("#duelOpponentBars"), state.duelOpponentAnswers, opponentActiveIndex);
 }
 
@@ -591,7 +577,7 @@ function renderShell() {
   }
   $("#pillAvatar").src = avatar(state.me);
   applyAvatarColor($("#pillAvatarWrap"), state.me);
-  $("#sideFire").innerHTML = `<span class="flame-days-count">${Number(state.me.fire_streak_days || 0).toLocaleString("id-ID")}</span><span class="flame-days-label">hari</span>`;
+  $("#sideFire").textContent = `${state.me.fire_streak_days} hari`;
   $("#homeAvatar").src = avatar(state.me);
   applyAvatarColor($("#homeAvatarWrap"), state.me);
   $("#duelUserAvatar").src = avatar(state.me);
@@ -646,7 +632,10 @@ function renderDashboard() {
     ["Level", levelName(user.lifetime_fp)],
     ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
   ];
-  $("#dashboardStats").innerHTML = stats.map(([label, value]) => `<article class="stat-card"><span>${label}</span><strong>${value}</strong></article>`).join("");
+  $("#dashboardStats").innerHTML = stats.map(([label, value]) => {
+    const fpClass = /fp/i.test(label) ? " fp-stat" : "";
+    return `<article class="stat-card${fpClass}"><span>${label}</span><strong>${value}</strong></article>`;
+  }).join("");
 }
 
 function showPage(page) {
@@ -659,23 +648,13 @@ function showPage(page) {
   $("#pageTitle").textContent = config[1];
   $$(".page").forEach((view) => view.classList.toggle("is-active", view.dataset.view === page));
   $$("[data-page]").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.page === page));
-  closeMobileSidebar();
+  $(".sidebar").classList.remove("is-open");
+  document.body.classList.remove("sidebar-open");
   if (page === "members") loadMembers().catch((err) => toast(err.message));
   if (page === "leaderboard") loadLeaderboard().catch((err) => toast(err.message));
   if (page === "badges") loadBadges().catch((err) => toast(err.message));
   if (page === "about") renderAbout();
   if (page === "settings") renderSettings();
-}
-
-function closeMobileSidebar() {
-  $(".sidebar")?.classList.remove("is-open");
-  document.body.classList.remove("sidebar-open");
-}
-
-function toggleMobileSidebar() {
-  const sidebar = $(".sidebar");
-  const isOpen = sidebar.classList.toggle("is-open");
-  document.body.classList.toggle("sidebar-open", isOpen);
 }
 
 function getDailyDuelLimit() {
@@ -928,7 +907,10 @@ function showMemberProfile(row) {
         <small>@${member.username} / ID ${member.given_id} · ${member.city || "-"}</small>
       </div>
       <div class="member-profile-stats">
-        ${stats.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")}
+        ${stats.map(([label, value]) => {
+          const fpClass = /fp/i.test(label) ? ' class="fp-stat"' : "";
+          return `<div${fpClass}><span>${label}</span><strong>${value}</strong></div>`;
+        }).join("")}
       </div>
     </article>
   `;
@@ -1103,32 +1085,44 @@ function subscribeDuelChannel(duelId) {
   }
   state.duelChannel = state.realtimeClient.channel(`forge-duel-${duelId}`);
   state.duelChannel
-    .on("broadcast", { event: "answer" }, () => refreshDuelStatus().catch(() => {}))
+    .on("broadcast", { event: "answer" }, ({ payload }) => {
+      applyOpponentAnswerPayload(payload);
+      refreshDuelStatus().catch(() => {});
+    })
     .on("broadcast", { event: "finish" }, () => finishDuel({ fromSync: true }).catch(() => {}))
     .subscribe();
+}
+
+function applyOpponentAnswerPayload(payload = {}) {
+  if (!state.duel?.id || payload.duelId !== state.duel.id || payload.from === state.me?.id) return;
+  const total = state.duel.questions.length;
+  const index = Number.isFinite(Number(payload.index)) ? Number(payload.index) : state.duel.questions.findIndex((question) => question.id === payload.questionId);
+  if (index < 0 || index >= total) return;
+  state.duelOpponentAnswers[index] = Boolean(payload.isCorrect);
+  state.duelOpponentAnsweredCount = Math.max(state.duelOpponentAnsweredCount, state.duelOpponentAnswers.filter((value) => value !== null).length);
+  renderDuelProgress();
 }
 
 function startDuelStatusWatcher() {
   clearInterval(state.duelStatusTimer);
   state.duelStatusTimer = window.setInterval(() => {
     refreshDuelStatus().catch(() => {});
-  }, 1500);
+  }, 800);
 }
 
 async function refreshDuelStatus() {
   if (!state.duel?.id) return;
   const data = await api(`/api/duel/${state.duel.id}/status`);
   const status = data.status;
-  if (status?.opponentAnswered !== undefined) {
+  if (Array.isArray(status?.opponentAnswers)) {
+    const byQuestion = new Map(status.opponentAnswers.map((answer) => [answer.questionId, Boolean(answer.isCorrect)]));
+    state.duelOpponentAnswers = state.duel.questions.map((question) => byQuestion.has(question.id) ? byQuestion.get(question.id) : null);
+    state.duelOpponentAnsweredCount = state.duelOpponentAnswers.filter((value) => value !== null).length;
+    renderDuelProgress();
+  } else if (status?.opponentAnswered !== undefined) {
     const visible = Math.min(status.opponentAnswered, state.duelOpponentAnswers.length);
     state.duelOpponentAnsweredCount = visible;
-    if (Array.isArray(status.opponentAnswers)) {
-      state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => (
-        index < status.opponentAnswers.length ? status.opponentAnswers[index] : value
-      ));
-    } else {
-      state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => index < visible ? "done" : null);
-    }
+    state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => index < visible ? (value ?? "done") : null);
     renderDuelProgress();
   }
   if (status?.status === "finished" && state.duel) {
@@ -1156,7 +1150,7 @@ async function loadLeaderboard() {
 
 function renderLeaderboard(data) {
   $("#leaderboardRows").innerHTML = data.rows.map((row) => `
-    <article class="leader-row top-${row.rank} ${row.id === state.me?.id ? "is-me" : ""}">
+    <article class="leader-row top-${row.rank} ${row.is_me ? "is-me" : ""}">
       <strong>#${row.rank}</strong>
       <div class="leader-player"><span class="avatar-ring" style="--avatar-color:${profileColor(row)}"><img src="${avatar(row)}" alt="" /></span><span><strong>${row.name}</strong><small>@${row.username}</small></span></div>
       <span>${levelName(row.lifetime_fp)}</span>
@@ -1179,10 +1173,11 @@ function renderLeaderboard(data) {
   `;
 
   $("#hallOfLegends").innerHTML = `
-    ${topList("Top 3 Fire Streak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
-    ${topList("Top 3 Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
-    ${topList("Top 3 Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
-    ${topList("Top 3 Lifetime FP", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
+    ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`)}
+    ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
+    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
+    ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
+    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
   `;
 }
 
@@ -1258,7 +1253,7 @@ function renderAbout() {
     ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
     ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span> reset Senin 00:00 WITA.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
-    ["Tutorial Singkat", `Daftar dengan nomor WhatsApp, login, mulai duel, kumpulkan <span class="about-fp-name"><img src="/image/fp.png" alt="FP" loading="lazy" />Forge Points</span>, dan buka badges.`],
+    ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],
     ["Masih Bingung?", "Silakan bertanya atau hubungi admin melalui contact person di footer."],
   ];
   $("#aboutGrid").innerHTML = items.map(([title, text]) => `<article class="about-card"><h3>${title}</h3><p>${text}</p></article>`).join("");
@@ -1285,18 +1280,21 @@ function renderSettings() {
     <div class="profile-stat-grid">
       <div class="copy-stat"><span>ID Pemain</span><strong>${state.me.given_id}</strong><button type="button" data-copy-value="${escapeHtml(state.me.given_id)}" data-copy-label="ID Pemain">Copy ID</button></div>
       <div class="copy-stat"><span>Username</span><strong>@${state.me.username}</strong><button type="button" data-copy-value="${escapeHtml(state.me.username)}" data-copy-label="Username">Copy Username</button></div>
+      <div class="copy-stat"><span>Email Aktif</span><strong>${state.me.email || "-"}</strong><button type="button" data-copy-value="${escapeHtml(state.me.email || "")}" data-copy-label="Email">Copy Email</button></div>
       ${[
+        ["Kota", state.me.city || "-"],
+        ["Jenis Kelamin", genderLabel(state.me.gender)],
         ["Level Pemain", levelName(state.me.lifetime_fp)],
         ["Total Poin", fpDisplay(state.me.lifetime_fp)],
         ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],
         ["Rekor Duel", duelRecordBoxes(state.me.wins, state.me.losses, state.me.draws)],
         ["Jawaban Benar", state.me.total_correct],
-        ["Streak Menang", `${state.me.current_win_streak} menang`],
-        ["Fire Streak", `${state.me.fire_streak_days} hari`],
         ["Rata-rata Waktu", avgTime(state.me)],
+        ["Streak Menang", `${state.me.current_win_streak} menang`],
         ["Akun Dibuat", state.me.created_at ? new Date(state.me.created_at).toLocaleDateString("id-ID") : "-"],
+        ["Fire Streak", `${state.me.fire_streak_days} hari`],
         ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
-      ].map(([label, value]) => `<div class="${statClass(label)}"><span>${label}</span><strong>${value}</strong></div>`).join("")}
+      ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")}
     </div>
   `;
 }
@@ -1411,13 +1409,12 @@ function renderQuestion() {
 }
 
 function tickQuestion() {
-  if (state.answerLocked) return;
   state.remaining -= 1;
   $("#timerValue").textContent = String(Math.max(0, state.remaining));
   $(".timer-ring").style.setProperty("--progress", `${Math.max(0, state.remaining * 10)}%`);
   playSound("tick");
   if (state.remaining <= 0) {
-    answerQuestion("__timeout__").catch((err) => toast(err.message));
+    answerQuestion(null);
   }
 }
 
@@ -1427,24 +1424,29 @@ async function answerQuestion(option) {
   clearInterval(state.duelTimer);
   const question = state.duel.questions[state.duelIndex];
   const timeMs = Math.min(10000, Math.round(performance.now() - state.questionStartedAt));
-  const selectedOption = ["A", "B", "C", "D"].includes(option) ? option : null;
-  const isCorrect = selectedOption === question.correct_option;
+  const isCorrect = option === question.correct_option;
   state.duelUserAnswers[state.duelIndex] = isCorrect;
   renderDuelProgress();
   $$(".answer-btn").forEach((btn) => {
     btn.disabled = true;
     if (btn.dataset.option === question.correct_option) btn.classList.add("correct");
-    if (selectedOption && btn.dataset.option === selectedOption && !isCorrect) btn.classList.add("wrong");
+    if (option && btn.dataset.option === option && !isCorrect) btn.classList.add("wrong");
   });
   playSound(isCorrect ? "correct" : "wrong");
   state.duelAnswerSaves.push(api("/api/duel/answer", {
     method: "POST",
-    body: { duelId: state.duel.id, questionId: question.id, selectedOption, answerTimeMs: timeMs },
+    body: { duelId: state.duel.id, questionId: question.id, selectedOption: option, answerTimeMs: timeMs },
   }));
   state.duelChannel?.send({
     type: "broadcast",
     event: "answer",
-    payload: { duelId: state.duel.id, index: state.duelIndex },
+    payload: {
+      duelId: state.duel.id,
+      from: state.me?.id,
+      index: state.duelIndex,
+      questionId: question.id,
+      isCorrect,
+    },
   }).catch(() => {});
   window.setTimeout(async () => {
     state.duelIndex += 1;
@@ -1599,12 +1601,17 @@ function bindEvents() {
   $("#profilePill").addEventListener("click", () => showPage("settings"));
   $("#mobileMenuBtn").addEventListener("click", (event) => {
     event.stopPropagation();
-    toggleMobileSidebar();
+    const sidebar = $(".sidebar");
+    const isOpen = sidebar.classList.toggle("is-open");
+    document.body.classList.toggle("sidebar-open", isOpen);
   });
+
   document.addEventListener("click", (event) => {
-    if (!document.body.classList.contains("sidebar-open")) return;
+    const sidebar = $(".sidebar");
+    if (!sidebar?.classList.contains("is-open")) return;
     if (event.target.closest(".sidebar") || event.target.closest("#mobileMenuBtn")) return;
-    closeMobileSidebar();
+    sidebar.classList.remove("is-open");
+    document.body.classList.remove("sidebar-open");
   });
   $("#genderPicker").addEventListener("click", (event) => {
     const button = event.target.closest("[data-gender]");

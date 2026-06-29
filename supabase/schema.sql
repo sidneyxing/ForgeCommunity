@@ -346,3 +346,24 @@ begin
   return query select true, v_duel_id;
 end;
 $$;
+
+-- Weekly Hall of Legends retention helper: keep only the latest 2 weeks of weekly snapshots.
+create or replace function public.cleanup_old_weekly_rank_snapshots()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.weekly_rank_snapshots
+  where week_key ~ '^\d{4}-\d{2}-\d{2}$'
+    and week_key::date < (current_date - interval '14 days');
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_cleanup_old_weekly_rank_snapshots on public.weekly_rank_snapshots;
+create trigger trg_cleanup_old_weekly_rank_snapshots
+after insert or update on public.weekly_rank_snapshots
+for each statement
+execute function public.cleanup_old_weekly_rank_snapshots();

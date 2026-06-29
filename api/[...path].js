@@ -77,7 +77,7 @@ export default async function handler(req, res) {
     if (method === "POST" && /^\/members\/[^/]+\/invite$/.test(path)) return inviteDuelRequest(res, db, user, path.split("/")[2]);
     if (method === "GET" && path === "/duel-requests") return duelRequests(res, db, user);
     if (method === "POST" && /^\/duel-requests\/[^/]+\/respond$/.test(path)) return respondDuelRequest(req, res, db, user, path.split("/")[2]);
-    if (method === "GET" && path === "/leaderboard") return leaderboard(res, db);
+    if (method === "GET" && path === "/leaderboard") return leaderboard(res, db, user);
     if (method === "GET" && path === "/badges") return badges(res, db, user);
     if (method === "POST" && path === "/duel/start") return startDuel(res, db, user);
     if (method === "GET" && path === "/duel/matchmaking/status") return matchmakingStatus(res, db, user);
@@ -623,8 +623,6 @@ async function mePayload(db, user) {
   const settings = await settingsFor(db, user.id);
   await runStorageMaintenance(db, user.id);
   await cleanupDuelHistory(db, user.id);
-  await resetExpiredFireStreak(db, user);
-  user = normalizeUserFireStreak(user);
   await awardBadges(db, user.id);
   const unlocked = await db.from("user_badges").select("badge_id", { count: "exact", head: true }).eq("user_id", user.id);
   const total = await db.from("badges").select("id", { count: "exact", head: true });
@@ -697,6 +695,7 @@ async function runStorageMaintenance(db, userId = null) {
     cleanupDuelRequestHistory(db),
     cleanupMatchQueue(db),
     cleanupOldDuels(db),
+    cleanupOldWeeklySnapshots(db),
   ]);
 }
 
@@ -740,6 +739,12 @@ async function cleanupOldDuels(db) {
   await db.from("duels").delete().in("status", ["finished", "cancelled"]).lt("finished_at", new Date(now - DATA_RETENTION_DAYS * ONE_DAY_MS).toISOString());
 }
 
+async function cleanupOldWeeklySnapshots(db) {
+  // Hall of Legends only needs recent weekly winners.
+  // Once a weekly snapshot is older than 2 weeks, remove it automatically.
+  await db.from("weekly_rank_snapshots").delete().lt("week_key", daysAgoDate(14));
+}
+
 async function updateProfile(req, res, db, user) {
   const data = body(req);
   const name = String(data.name || "").trim();
@@ -780,7 +785,7 @@ async function members(req, res, db, user) {
   const tab = String(req.query.tab || "all");
   const rels = unwrap(await db.from("relationships").select("owner_id, target_id, is_favourite").eq("owner_id", user.id));
   const relByTarget = new Map(rels.map((rel) => [rel.target_id, rel]));
-  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_fire_date, last_seen_at").neq("id", user.id);
+  let query = db.from("users").select("id, given_id, name, username, phone, city, gender, lifetime_fp, weekly_fp, wins, losses, draws, total_correct, total_answer_time_ms, total_answers, current_win_streak, fire_streak_days, last_seen_at").neq("id", user.id);
   if (q) query = query.or(`username.ilike.%${q}%,name.ilike.%${q}%,given_id.ilike.%${q}%`);
   if (tab === "favourites") {
     const ids = rels.filter((rel) => rel.is_favourite).map((rel) => rel.target_id);
@@ -790,7 +795,6 @@ async function members(req, res, db, user) {
   const rows = unwrap(await query.order("weekly_fp", { ascending: false }).order("username", { ascending: true }).limit(80));
   const onlineCutoff = Date.now() - ONLINE_CUTOFF_MS;
   const members = rows.map((member) => {
-    member = normalizeUserFireStreak(member);
     const rel = relByTarget.get(member.id) || {};
     const online = member.last_seen_at && new Date(member.last_seen_at).getTime() > onlineCutoff;
     return { ...member, online, is_friend: true, is_favourite: Boolean(rel.is_favourite) };
@@ -911,18 +915,18 @@ async function cleanupExpiredDuelRequests(db) {
     .lt("expires_at", new Date().toISOString());
 }
 
-async function leaderboard(res, db) {
-  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days, last_fire_date").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
-  const normalizedRows = rows.map(normalizeUserFireStreak);
-  const ranked = normalizedRows.map((row, index) => ({ ...row, rank: index + 1, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
-  const fire = [...normalizedRows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
-  const mostWins = [...normalizedRows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
-  const fastest = normalizedRows
+async function leaderboard(res, db, viewer = null) {
+  await cleanupOldWeeklySnapshots(db);
+  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
+  const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, is_me: row.id === viewer?.id, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
+  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 3).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
+  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 3).map(({ username, wins }) => ({ username, wins }));
+  const fastest = rows
     .filter((row) => row.total_answers)
     .sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))
     .slice(0, 3)
     .map((row) => ({ username: row.username, avg_time: `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` }));
-  const lifetime = [...normalizedRows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
+  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 3).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
   const latestSnapshot = unwrap(await db
     .from("weekly_rank_snapshots")
     .select("week_key")
@@ -942,18 +946,20 @@ async function leaderboard(res, db) {
     ? unwrap(await db.from("users").select("id, name, username").in("id", snapshotUserIds))
     : [];
   const snapshotByUser = new Map(snapshotUsers.map((user) => [user.id, user]));
+  const lastWinners = previousWeekRows.map((row) => ({
+    ...row,
+    name: snapshotByUser.get(row.user_id)?.name || "Member",
+    username: snapshotByUser.get(row.user_id)?.username || "member",
+  }));
+
   return send(res, 200, {
     rows: ranked,
-    legends: { fire, mostWins, fastest, lifetime },
+    legends: { lastWeek: lastWinners, fire, fastest, lifetime, mostWins },
     weekly: {
       currentWeek: weekKey(),
       recapAt: "Minggu 23:50 WITA",
       resetAt: "Senin 00:00 WITA",
-      lastWinners: previousWeekRows.map((row) => ({
-        ...row,
-        name: snapshotByUser.get(row.user_id)?.name || "Member",
-        username: snapshotByUser.get(row.user_id)?.username || "member",
-      })),
+      lastWinners,
     },
   });
 }
@@ -975,7 +981,7 @@ async function badges(res, db, user) {
 }
 
 async function startDuel(res, db, user) {
-  return send(res, 200, await joinMatchmakingFallback(db, user));
+  return send(res, 200, await joinMatchmaking(db, user));
 }
 
 async function joinMatchmaking(db, user) {
@@ -998,9 +1004,6 @@ async function joinMatchmaking(db, user) {
     if (message.includes("QUESTION_POOL_NOT_READY")) {
       throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
     }
-    if (isMatchmakingRpcUnavailable(rpcResult.error)) {
-      return joinMatchmakingFallback(db, user);
-    }
     throw rpcResult.error;
   }
   const result = rpcResult.data;
@@ -1016,138 +1019,6 @@ async function joinMatchmaking(db, user) {
 
   const duel = unwrap(await db.from("duels").select("*").eq("id", match.duel_id).single());
   return { duel: await duelPayload(db, duel, user.id) };
-}
-
-function isMatchmakingRpcUnavailable(error) {
-  const message = String(error?.message || "").toLowerCase();
-  const details = String(error?.details || "").toLowerCase();
-  const code = String(error?.code || "");
-  return code === "PGRST202"
-    || message.includes("match_duel_queue")
-    || message.includes("could not find the function")
-    || details.includes("match_duel_queue");
-}
-
-async function joinMatchmakingFallback(db, user) {
-  await cleanupMatchQueue(db);
-  const todayCount = await duelsTodayCount(db, user.id);
-  if (todayCount >= DAILY_DUEL_LIMIT) {
-    throw Object.assign(new Error(`Limit ${DAILY_DUEL_LIMIT} duel per hari sudah tercapai.`), { status: 429 });
-  }
-
-  unwrap(await db.from("users").update({ last_seen_at: new Date().toISOString() }).eq("id", user.id));
-
-  const existingQueue = unwrap(await db
-    .from("duel_queue")
-    .select("status, duel_id")
-    .eq("user_id", user.id)
-    .maybeSingle());
-  if (existingQueue?.status === "matched" && existingQueue.duel_id) {
-    const duel = unwrap(await db.from("duels").select("*").eq("id", existingQueue.duel_id).maybeSingle());
-    if (duel && isDuelParticipant(duel, user.id) && duel.status === "active") {
-      return { duel: await duelPayload(db, duel, user.id) };
-    }
-  }
-  if (existingQueue?.status === "matched") {
-    return {
-      waiting: true,
-      message: "Menyambungkan duel. Mohon tunggu sebentar.",
-      queue: { staleInMs: MATCH_QUEUE_STALE_MS },
-    };
-  }
-
-  const queuedAt = new Date().toISOString();
-  const selfQueue = unwrap(await db.from("duel_queue").upsert({
-    user_id: user.id,
-    status: "waiting",
-    duel_id: null,
-    last_seen_at: queuedAt,
-    updated_at: queuedAt,
-  }, { onConflict: "user_id" }).select("user_id, updated_at").single());
-
-  const opponentQueues = unwrap(await db
-    .from("duel_queue")
-    .select("user_id, updated_at")
-    .eq("status", "waiting")
-    .neq("user_id", user.id)
-    .lt("updated_at", selfQueue.updated_at)
-    .gt("last_seen_at", new Date(Date.now() - MATCH_QUEUE_STALE_MS).toISOString())
-    .order("updated_at", { ascending: true })
-    .limit(8));
-
-  if (!opponentQueues.length) {
-    return {
-      waiting: true,
-      message: "Menunggu lawan online. Jangan tutup halaman ini.",
-      queue: { staleInMs: MATCH_QUEUE_STALE_MS },
-    };
-  }
-
-  for (const opponentQueue of opponentQueues) {
-    const reservedAt = new Date().toISOString();
-    const reservedOpponent = unwrap(await db.from("duel_queue").update({
-      status: "matched",
-      duel_id: null,
-      updated_at: reservedAt,
-      last_seen_at: reservedAt,
-    })
-      .eq("user_id", opponentQueue.user_id)
-      .eq("status", "waiting")
-      .select("user_id"));
-
-    if (!reservedOpponent.length) continue;
-
-    const reservedSelf = unwrap(await db.from("duel_queue").update({
-      status: "matched",
-      duel_id: null,
-      updated_at: reservedAt,
-      last_seen_at: reservedAt,
-    })
-      .eq("user_id", user.id)
-      .eq("status", "waiting")
-      .select("user_id"));
-
-    if (!reservedSelf.length) {
-      await db.from("duel_queue").update({
-        status: "waiting",
-        duel_id: null,
-        updated_at: opponentQueue.updated_at,
-        last_seen_at: new Date().toISOString(),
-      }).eq("user_id", opponentQueue.user_id).is("duel_id", null);
-      return {
-        waiting: true,
-        message: "Menunggu lawan online. Jangan tutup halaman ini.",
-        queue: { staleInMs: MATCH_QUEUE_STALE_MS },
-      };
-    }
-
-    try {
-      const now = new Date().toISOString();
-      await db.from("users").update({ last_seen_at: now }).in("id", [user.id, opponentQueue.user_id]);
-      const questions = await flexibleDuelQuestions(db);
-      const duel = await createDuel(db, user, opponentQueue.user_id, questions);
-      unwrap(await db.from("duel_queue").update({
-        status: "matched",
-        duel_id: duel.id,
-        updated_at: new Date().toISOString(),
-        last_seen_at: new Date().toISOString(),
-      }).in("user_id", [user.id, opponentQueue.user_id]).select("user_id"));
-      return { duel };
-    } catch (error) {
-      await db.from("duel_queue").update({
-        status: "waiting",
-        duel_id: null,
-        last_seen_at: new Date().toISOString(),
-      }).in("user_id", [user.id, opponentQueue.user_id]).is("duel_id", null);
-      throw error;
-    }
-  }
-
-  return {
-    waiting: true,
-    message: "Menunggu lawan online. Jangan tutup halaman ini.",
-    queue: { staleInMs: MATCH_QUEUE_STALE_MS },
-  };
 }
 
 async function matchmakingStatus(res, db, user) {
@@ -1175,6 +1046,7 @@ async function matchmakingStatus(res, db, user) {
   }
 
   unwrap(await db.from("duel_queue").update({
+    updated_at: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
   }).eq("user_id", user.id).eq("status", "waiting"));
   return send(res, 200, { waiting: true });
@@ -1268,34 +1140,6 @@ async function dailyDuelQuestions(db) {
   return selectedIds.map((questionId) => byId.get(questionId)).filter(Boolean);
 }
 
-async function flexibleDuelQuestions(db) {
-  try {
-    const dailyQuestions = await dailyDuelQuestions(db);
-    if (dailyQuestions.length >= DUEL_QUESTION_COUNT) return dailyQuestions;
-  } catch {
-    // Fall through to the simple pool so duel start is not blocked by category pool setup.
-  }
-
-  let rows = unwrap(await db
-    .from("questions")
-    .select("*")
-    .eq("active", true)
-    .limit(500));
-
-  if (rows.length < DUEL_QUESTION_COUNT) {
-    rows = unwrap(await db
-      .from("questions")
-      .select("*")
-      .limit(500));
-  }
-
-  const questions = shuffle(rows).slice(0, DUEL_QUESTION_COUNT);
-  if (questions.length < DUEL_QUESTION_COUNT) {
-    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 400 });
-  }
-  return questions;
-}
-
 async function duelQuestions(db, duelId) {
   const rows = unwrap(await db
     .from("duel_questions")
@@ -1338,35 +1182,36 @@ function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
 
 async function duelStatusPayload(db, duel, viewerId) {
   const side = participantSide(duel, viewerId);
-  const answers = unwrap(await db.from("duel_answers").select("*").eq("duel_id", duel.id));
-  const questionLinks = unwrap(await db
-    .from("duel_questions")
-    .select("question_id, position")
+  const answers = unwrap(await db
+    .from("duel_answers")
+    .select("duel_id, question_id, user_id, selected_option, is_correct, answer_time_ms, answered_at")
     .eq("duel_id", duel.id)
-    .order("position", { ascending: true }));
+    .order("answered_at", { ascending: true }));
   const mineId = side === "opponent" ? duel.opponent_id : duel.user_id;
   const theirsId = side === "opponent" ? duel.user_id : duel.opponent_id;
   const mine = answers.filter((answer) => answer.user_id === mineId);
   const theirs = answers.filter((answer) => answer.user_id === theirsId);
-  const theirsByQuestion = new Map(theirs.map((answer) => [answer.question_id, Boolean(answer.is_correct)]));
-  const opponentAnswers = questionLinks.map((link) => (
-    theirsByQuestion.has(link.question_id) ? theirsByQuestion.get(link.question_id) : null
-  ));
   const score = scoreForSide(duel, side);
+  const publicAnswer = (answer) => ({
+    questionId: answer.question_id,
+    isCorrect: Boolean(answer.is_correct),
+    answeredAt: answer.answered_at,
+  });
   return {
     duelId: duel.id,
     status: duel.status,
     result: resultForSide(resultForDuel(duel), side),
     mineAnswered: mine.length,
     opponentAnswered: duel.opponent_id ? theirs.length : Math.min(mine.length, DUEL_QUESTION_COUNT),
-    opponentAnswers,
+    mineAnswers: mine.map(publicAnswer),
+    opponentAnswers: duel.opponent_id ? theirs.map(publicAnswer) : [],
     mineScore: duel.status === "finished" ? score.mine : mine.filter((answer) => answer.is_correct).length,
     opponentScore: duel.status === "finished" ? score.theirs : duel.opponent_id ? theirs.filter((answer) => answer.is_correct).length : Number(duel.opponent_score || 0),
     fpAwarded: side === "opponent" ? Number(duel.opponent_fp_awarded || 0) : Number(duel.fp_awarded || 0),
   };
 }
 
-async function createDuel(db, user, opponentId = null, pickedQuestions = null) {
+async function createDuel(db, user, opponentId = null) {
   if (!opponentId) {
     throw Object.assign(new Error("Menunggu lawan online. Duel tidak dibuat dengan bot/template offline."), { status: 400 });
   }
@@ -1377,7 +1222,7 @@ async function createDuel(db, user, opponentId = null, pickedQuestions = null) {
     throw Object.assign(new Error(`Lawan sudah mencapai limit ${DAILY_DUEL_LIMIT} duel hari ini.`), { status: 429 });
   }
 
-  const questions = pickedQuestions || await flexibleDuelQuestions(db);
+  const questions = await dailyDuelQuestions(db);
   if (questions.length < DUEL_QUESTION_COUNT) {
     throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
   }
@@ -1532,25 +1377,6 @@ function nextFireStreak(user) {
   if (user.last_fire_date === today) return { fire_streak_days: user.fire_streak_days || 1, last_fire_date: today };
   if (user.last_fire_date === yesterdayDate()) return { fire_streak_days: Number(user.fire_streak_days || 0) + 1, last_fire_date: today };
   return { fire_streak_days: 1, last_fire_date: today };
-}
-
-function activeFireStreakDays(user = {}) {
-  if (!user.last_fire_date) return 0;
-  if (user.last_fire_date === todayDate() || user.last_fire_date === yesterdayDate()) {
-    return Number(user.fire_streak_days || 0);
-  }
-  return 0;
-}
-
-function normalizeUserFireStreak(user = {}) {
-  return { ...user, fire_streak_days: activeFireStreakDays(user) };
-}
-
-async function resetExpiredFireStreak(db, user = {}) {
-  if (!user.id || !user.last_fire_date) return;
-  if (activeFireStreakDays(user) !== 0 || Number(user.fire_streak_days || 0) === 0) return;
-  await db.from("users").update({ fire_streak_days: 0 }).eq("id", user.id);
-  user.fire_streak_days = 0;
 }
 
 function normalizeCategory(value = "") {

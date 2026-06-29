@@ -3313,3 +3313,165 @@ select:focus {
     font-size: clamp(2.35rem, 13.5vw, 3.75rem) !important;
   }
 }
+
+/* FORGE final FP diamond sizing + consistent red */
+.fp-chip {
+  align-items: baseline !important;
+  display: inline-flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0.18em !important;
+  line-height: 1 !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  width: auto !important;
+}
+
+.fp-chip .fp-value,
+.fp-value {
+  color: inherit !important;
+  font: inherit !important;
+  line-height: 1 !important;
+}
+
+.fp-diamond {
+  --fp-size: 0.56em;
+  background: currentColor !important;
+  clip-path: polygon(50% 0%, 91% 35%, 69% 100%, 31% 100%, 9% 35%) !important;
+  color: inherit !important;
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  height: var(--fp-size) !important;
+  margin-left: 0.08em !important;
+  opacity: 1 !important;
+  position: relative !important;
+  top: -0.045em !important;
+  width: calc(var(--fp-size) * 1.08) !important;
+}
+
+.fp-diamond::after {
+  background: rgba(255, 253, 248, 0.36) !important;
+  clip-path: polygon(50% 0%, 100% 36%, 72% 36%, 50% 100%, 28% 36%, 0 36%) !important;
+  content: "" !important;
+  inset: 0.08em !important;
+  position: absolute !important;
+}
+
+.fp-icon,
+.fp-chip .fp-icon,
+.about-fp-line img,
+.about-fp-name img,
+.about-inline-fp img {
+  display: none !important;
+}
+
+.stat-card.fp-stat {
+  align-content: start !important;
+  display: grid !important;
+  gap: 0.72rem !important;
+  justify-items: start !important;
+  min-height: 172px !important;
+  overflow: hidden !important;
+  padding: clamp(1.25rem, 1.9vw, 1.65rem) !important;
+  text-align: left !important;
+}
+
+.stat-card.fp-stat > span {
+  margin: 0 !important;
+}
+
+.stat-card.fp-stat > strong {
+  align-items: baseline !important;
+  color: var(--red) !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  font-size: clamp(2rem, 3.15vw, 3.05rem) !important;
+  font-weight: 1000 !important;
+  justify-content: flex-start !important;
+  letter-spacing: -0.035em !important;
+  line-height: 0.95 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+
+.stat-card.fp-stat .fp-chip {
+  color: var(--red) !important;
+  font-size: 1em !important;
+  font-weight: inherit !important;
+  letter-spacing: inherit !important;
+  max-width: 100% !important;
+}
+
+.stat-card.fp-stat .fp-diamond {
+  --fp-size: 0.42em;
+  flex-shrink: 0 !important;
+  letter-spacing: 0 !important;
+  margin-left: 0.14em !important;
+  top: -0.06em !important;
+}
+
+.member-level-cell .fp-chip,
+.member-profile-stats .fp-chip,
+.profile-stat-grid .fp-chip,
+.leader-row .fp-chip,
+.legend-person .fp-chip,
+.duel-history-item .fp-chip,
+.duel-result-card .fp-chip,
+.profile-pill .fp-chip {
+  color: var(--red) !important;
+}
+
+.member-level-cell .fp-diamond,
+.member-profile-stats .fp-diamond,
+.profile-stat-grid .fp-diamond,
+.leader-row .fp-diamond,
+.legend-person .fp-diamond,
+.duel-history-item .fp-diamond,
+.duel-result-card .fp-diamond,
+.profile-pill .fp-diamond {
+  --fp-size: 0.58em;
+  color: inherit !important;
+}
+
+.leader-row.is-me .fp-chip,
+.leader-row.is-me .fp-diamond {
+  color: #fff7e6 !important;
+}
+
+.profile-total-points {
+  border-color: rgba(155, 17, 30, 0.18) !important;
+}
+
+.profile-total-points strong {
+  color: var(--red) !important;
+  font-size: clamp(1.75rem, 2.8vw, 2.45rem) !important;
+  line-height: 0.95 !important;
+}
+
+.profile-total-points .fp-chip {
+  color: var(--red) !important;
+  font-weight: 1000 !important;
+}
+
+.profile-total-points .fp-diamond {
+  --fp-size: 0.46em;
+  margin-left: 0.12em !important;
+}
+
+@media (max-width: 1180px) {
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.75rem, 4.5vw, 2.55rem) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .stat-card.fp-stat {
+    min-height: 132px !important;
+  }
+  .stat-card.fp-stat > strong {
+    font-size: clamp(1.75rem, 10vw, 2.55rem) !important;
+  }
+}
+

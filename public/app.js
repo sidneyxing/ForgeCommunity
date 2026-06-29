@@ -1307,7 +1307,7 @@ function renderSettings() {
       <div class="copy-stat"><span>Username</span><strong>@${state.me.username}</strong><button type="button" data-copy-value="${escapeHtml(state.me.username)}" data-copy-label="Username">Copy Username</button></div>
       ${[
         ["Level Pemain", levelName(state.me.lifetime_fp)],
-        ["Total Poin", fpDisplay(state.me.lifetime_fp)],
+        ["Total Poin", fpDisplay(state.me.lifetime_fp), "profile-total-points"],
         ["Badge Unlocked", `${Number(state.dashboard.unlockedBadges || 0).toLocaleString("id-ID")}/${Number(state.dashboard.totalBadges || 0).toLocaleString("id-ID")}`],
         ["Rekor Duel", duelRecordBoxes(state.me.wins, state.me.losses, state.me.draws)],
         ["Jawaban Benar", state.me.total_correct],
@@ -1316,7 +1316,7 @@ function renderSettings() {
         ["Akun Dibuat", state.me.created_at ? new Date(state.me.created_at).toLocaleDateString("id-ID") : "-"],
         ["Fire Streak", `${state.me.fire_streak_days} hari`],
         ["Duel Hari Ini", `${state.dashboard.duelsToday || 0}/${dailyLimit}`],
-      ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")}
+      ].map(([label, value, extraClass]) => `<div class="${extraClass || ""}"><span>${label}</span><strong>${value}</strong></div>`).join("")}
     </div>
   `;
 }

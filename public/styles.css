@@ -2873,3 +2873,57 @@ select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* Patch: Fire Streak stays inline beside the flame and supports 3-digit days */
+.daily-flame {
+  align-items: center;
+  grid-template-columns: 66px minmax(168px, 1fr);
+}
+
+.daily-flame > div {
+  min-width: 168px;
+}
+
+.daily-flame strong {
+  display: block;
+  font-size: clamp(1.85rem, 2.1vw, 2.15rem);
+  letter-spacing: -0.03em;
+  min-width: 9.6rem;
+  white-space: nowrap;
+}
+
+.badge-tile.locked .badge-icon {
+  font-size: 1.35rem;
+  font-weight: 1000;
+  letter-spacing: 0.04em;
+}
+
+.badge-tile.locked strong {
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 860px) {
+  .sidebar {
+    max-width: 310px;
+    width: min(88vw, 310px);
+  }
+
+  .daily-flame {
+    grid-template-columns: 62px minmax(156px, 1fr);
+  }
+
+  .daily-flame-icon {
+    flex-basis: 62px;
+    height: 62px;
+    width: 62px;
+  }
+
+  .daily-flame > div {
+    min-width: 156px;
+  }
+
+  .daily-flame strong {
+    font-size: 1.9rem;
+    min-width: 9rem;
+  }
+}

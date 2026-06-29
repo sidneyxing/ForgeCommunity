@@ -54,21 +54,25 @@ let maintenanceLastRunAt = 0;
 
 export default async function handler(req, res) {
   try {
-    const db = getSupabase();
-    await ensureSeedOnce(db);
-    await ensureWeeklySeason(db);
-
     const method = req.method.toUpperCase();
     const path = resolveApiPath(req);
 
+    if (method === "GET" && path === "/realtime-config") return realtimeConfig(res);
+
+    const db = getSupabase();
+
+    // Auth/reset routes must stay light and public. Do not run seed/weekly jobs here,
+    // so a password-reset email cannot fail because of unrelated maintenance work.
     if (method === "POST" && path === "/auth/register") return register(req, res, db);
     if (method === "POST" && path === "/auth/login") return login(req, res, db);
     if (method === "POST" && path === "/auth/logout") return logout(req, res, db);
     if (method === "POST" && path === "/auth/reset/request") return requestPasswordReset(req, res, db);
     if (method === "POST" && path === "/auth/reset/confirm") return confirmPasswordReset(req, res, db);
 
+    await ensureSeedOnce(db);
+    await ensureWeeklySeason(db);
+
     const user = await requireUser(req, db);
-    if (method === "GET" && path === "/realtime-config") return realtimeConfig(res);
     if (method === "GET" && path === "/me") return send(res, 200, await mePayload(db, user));
     if (method === "PATCH" && path === "/me/profile") return updateProfile(req, res, db, user);
     if (method === "PATCH" && path === "/me/settings") return updateSettings(req, res, db, user);
@@ -461,28 +465,77 @@ function randomResetCode() {
   return String(value).padStart(6, "0");
 }
 
+function badgeNumber(badge = {}) {
+  const match = String(badge.id || "").match(/_(\d+)$/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function badgeGroupOrder(badge = {}) {
+  const number = badgeNumber(badge);
+  if (number <= 10) return 10;   // Duel count
+  if (number <= 20) return 20;   // Wins
+  if (number <= 30) return 30;   // Win streak
+  if (number <= 40) return 40;   // Lifetime FP
+  if (number <= 50) return 50;   // Bible
+  if (number <= 60) return 60;   // Character
+  if (number <= 70) return 70;   // Technology
+  if (number <= 80) return 80;   // Geography
+  if (number <= 90) return 90;   // Logic
+  if (number <= 100) return 100; // General knowledge
+  if (number <= 110) return 110; // Health
+  if (number <= 120) return 120; // Psychology
+  if (number <= 130) return 130; // Economy
+  if (number <= 140) return 140; // English
+  if (number <= 150) return 150; // Weekly ranks
+  return 999;
+}
+
+function compareBadgesByGroup(a, b) {
+  return badgeGroupOrder(a) - badgeGroupOrder(b) || badgeNumber(a) - badgeNumber(b) || String(a.name || "").localeCompare(String(b.name || ""));
+}
+
 async function sendPasswordResetEmail(email, code) {
   const apiKey = process.env.RESEND_API_KEY || "";
-  const from = process.env.RESET_FROM_EMAIL || "";
+  const from = process.env.RESET_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || "";
+  const replyTo = process.env.RESET_REPLY_TO_EMAIL || process.env.FORGE_SUPPORT_EMAIL || "";
+
   if (!apiKey || !from) {
-    throw Object.assign(new Error("Email reset belum dikonfigurasi admin."), { status: 500 });
+    throw Object.assign(new Error("Email reset belum dikonfigurasi admin. Isi RESEND_API_KEY dan RESET_FROM_EMAIL di Environment Variables Vercel."), { status: 500 });
   }
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: email,
-      subject: "Kode Reset Password FORGE",
-      text: `Kode reset password FORGE kamu: ${code}. Kode berlaku 15 menit. Abaikan email ini kalau kamu tidak meminta reset password.`,
-      html: `<p>Kode reset password FORGE kamu:</p><h2>${code}</h2><p>Kode berlaku 15 menit.</p><p>Abaikan email ini kalau kamu tidak meminta reset password.</p>`,
-    }),
-  });
+
+  let response;
+  let responseText = "";
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "user-agent": "FORGE-reset/1.0",
+      },
+      body: JSON.stringify({
+        from,
+        to: email,
+        subject: "Kode Reset Password FORGE",
+        text: `Kode reset password FORGE kamu: ${code}. Kode berlaku 15 menit. Abaikan email ini kalau kamu tidak meminta reset password.`,
+        html: `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#2a211e"><p>Kode reset password FORGE kamu:</p><h1 style="letter-spacing:6px;color:#9b111e">${code}</h1><p>Kode berlaku 15 menit.</p><p>Abaikan email ini kalau kamu tidak meminta reset password.</p></div>`,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
+    });
+    responseText = await response.text().catch(() => "");
+  } catch (error) {
+    throw Object.assign(new Error(`Email reset gagal terhubung ke Resend: ${error.message || "network error"}`), { status: 502 });
+  }
+
   if (!response.ok) {
-    throw Object.assign(new Error("Email reset gagal dikirim."), { status: 502 });
+    let detail = responseText;
+    try {
+      const parsed = responseText ? JSON.parse(responseText) : null;
+      detail = parsed?.message || parsed?.error || responseText;
+    } catch {
+      // Keep raw text if Resend returns non-JSON.
+    }
+    throw Object.assign(new Error(`Email reset gagal dikirim via Resend (${response.status}). ${detail || "Cek RESEND_API_KEY dan RESET_FROM_EMAIL."}`), { status: 502 });
   }
 }
 
@@ -966,16 +1019,28 @@ async function leaderboard(res, db, viewer = null) {
 
 async function badges(res, db, user) {
   await awardBadges(db, user.id);
-  const badgeRows = unwrap(await db.from("badges").select("id, name, description, img_url").order("name", { ascending: true }));
+  const badgeRows = unwrap(await db.from("badges").select("id, name, description, img_url"));
   const earned = unwrap(await db.from("user_badges").select("*").eq("user_id", user.id));
   const earnedById = new Map(earned.map((item) => [item.badge_id, item.earned_at]));
   const badges = badgeRows
-    .map((badge) => ({ ...badge, earned_at: earnedById.get(badge.id) || null }))
+    .map((badge) => {
+      const earnedAt = earnedById.get(badge.id) || null;
+      if (!earnedAt) {
+        return {
+          id: badge.id,
+          name: "???",
+          description: "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya.",
+          img_url: null,
+          earned_at: null,
+          locked: true,
+        };
+      }
+      return { ...badge, earned_at: earnedAt, locked: false };
+    })
     .sort((a, b) => {
-      if (a.earned_at && b.earned_at) return new Date(a.earned_at).getTime() - new Date(b.earned_at).getTime();
-      if (a.earned_at) return -1;
-      if (b.earned_at) return 1;
-      return a.name.localeCompare(b.name);
+      if (a.earned_at && !b.earned_at) return -1;
+      if (!a.earned_at && b.earned_at) return 1;
+      return compareBadgesByGroup(a, b);
     });
   return send(res, 200, { total: badges.length, unlocked: earned.length, badges });
 }

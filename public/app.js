@@ -1202,13 +1202,17 @@ function renderBadges(data) {
   const badgeDetail = $("#badgeDetail");
   badgeDetail?.classList.add("is-hidden");
   if (badgeDetail) badgeDetail.innerHTML = "";
-  $("#badgeGrid").innerHTML = data.badges.map((badge) => `
-    <button class="badge-tile ${badge.earned_at ? "" : "locked"}" data-badge='${JSON.stringify(badge).replace(/'/g, "&apos;")}'>
-      <span class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</span>
-      <strong>${badge.name}</strong>
-      <small>${badge.earned_at ? "Terbuka" : "Terkunci"}</small>
-    </button>
-  `).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
+  $("#badgeGrid").innerHTML = data.badges.map((badge) => {
+    const unlocked = Boolean(badge.earned_at);
+    const safeBadge = unlocked ? badge : { ...badge, name: "???", description: "Syarat badge masih tersembunyi.", img_url: null };
+    return `
+      <button class="badge-tile ${unlocked ? "" : "locked"}" data-badge='${JSON.stringify(safeBadge).replace(/'/g, "&apos;")}'>
+        <span class="badge-icon">${unlocked ? badgeVisual(badge) : "???"}</span>
+        <strong>${unlocked ? escapeHtml(badge.name) : "???"}</strong>
+        <small>${unlocked ? "Terbuka" : "Terkunci"}</small>
+      </button>
+    `;
+  }).join("") || `<p class="muted">Badge belum tersedia. Buka halaman ini lagi setelah database schema dan seed berhasil.</p>`;
 }
 
 function badgeVisual(badge) {
@@ -1221,15 +1225,16 @@ function showBadgeDetail(button) {
   const badge = JSON.parse(button.dataset.badge.replace(/&apos;/g, "'"));
   document.querySelector(".badge-modal")?.remove();
   const earnedAt = badge.earned_at ? formatDateTimeId(badge.earned_at) : null;
+  const unlocked = Boolean(badge.earned_at);
   document.body.insertAdjacentHTML("beforeend", `
     <div class="badge-modal" role="dialog" aria-modal="true">
       <button class="badge-modal-backdrop" type="button" data-badge-close aria-label="Tutup detail badge"></button>
       <article class="badge-modal-card">
         <button class="badge-modal-close" type="button" data-badge-close aria-label="Tutup">x</button>
-        <div class="badge-icon">${badge.earned_at ? badgeVisual(badge) : "?"}</div>
-        <h3>${escapeHtml(badge.name)}</h3>
-        <p>${escapeHtml(badge.description)}</p>
-        <p><strong>Status:</strong> ${badge.earned_at ? "Terbuka" : "Terkunci"}</p>
+        <div class="badge-icon">${unlocked ? badgeVisual(badge) : "???"}</div>
+        <h3>${unlocked ? escapeHtml(badge.name) : "???"}</h3>
+        <p>${unlocked ? escapeHtml(badge.description) : "Syarat badge ini masih tersembunyi sampai kamu berhasil membukanya."}</p>
+        <p><strong>Status:</strong> ${unlocked ? "Terbuka" : "Terkunci"}</p>
         ${earnedAt ? `<p><strong>Earned at:</strong> ${earnedAt}</p>` : ""}
       </article>
     </div>

@@ -3210,7 +3210,7 @@ select:focus {
 /* 1. HOME - FP Mingguan & Lifetime FP */
 /* Kecilkan/besarkan angka Home di sini */
 .stat-card.fp-stat > strong {
-  font-size: clamp(1.45rem, 2vw, 2rem) !important;
+  font-size: clamp(1.35rem, 1.8vw, 1.8rem) !important;
   line-height: 1 !important;
   white-space: nowrap !important;
   overflow: visible !important;
@@ -3234,7 +3234,7 @@ select:focus {
 /* Besarkan/kecilkan diamond Total Poin di sini */
 .profile-total-points .fp-diamond,
 .profile-stat-grid .fp-diamond {
-  --fp-size: 0.85em !important;
+  --fp-size: 1em !important;
 }
 
 
@@ -3247,7 +3247,7 @@ select:focus {
 
 /* Besarkan/kecilkan diamond list members di sini */
 .member-level-cell .fp-diamond {
-  --fp-size: 0.85em !important;
+  --fp-size: 1em !important;
 }
 
 
@@ -3260,5 +3260,5 @@ select:focus {
 
 /* Besarkan/kecilkan diamond statistik teman di sini */
 .member-profile-stats .fp-diamond {
-  --fp-size: 0.85em !important;
+  --fp-size: 1em !important;
 }

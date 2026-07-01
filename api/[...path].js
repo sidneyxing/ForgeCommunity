@@ -1360,20 +1360,58 @@ async function matchmakingStatus(res, db, user) {
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle());
+
   if (!queue || queue.status === "cancelled") {
-    return send(res, 200, { waiting: false, cancelled: true });
+    return send(res, 200, {
+      waiting: false,
+      cancelled: true,
+      reason: "queue_cancelled",
+      message: "Pencarian lawan dibatalkan atau sudah timeout.",
+    });
   }
 
-  if (queue.status === "matched" && queue.duel_id) {
+  if (queue.status === "matched") {
+    if (!queue.duel_id) {
+      await db.from("duel_queue").update({
+        status: "cancelled",
+        duel_id: null,
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", user.id).eq("status", "matched");
+      return send(res, 200, {
+        waiting: false,
+        cancelled: true,
+        reason: "matched_without_duel",
+        message: "Match lama sudah tidak valid. Silakan cari lawan lagi.",
+      });
+    }
+
     const duel = unwrap(await db.from("duels").select("*").eq("id", queue.duel_id).maybeSingle());
-    if (duel && isDuelParticipant(duel, user.id)) {
+    if (duel && duel.status === "active" && isDuelParticipant(duel, user.id)) {
       return send(res, 200, { waiting: false, duel: await duelPayload(db, duel, user.id) });
     }
+
+    await db.from("duel_queue").update({
+      status: "cancelled",
+      duel_id: null,
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", user.id).eq("status", "matched");
+
+    return send(res, 200, {
+      waiting: false,
+      cancelled: true,
+      reason: "matched_duel_not_active",
+      message: "Match sebelumnya sudah batal atau selesai. Silakan cari lawan lagi.",
+    });
   }
 
   if (queue.status === "waiting" && new Date(queue.last_seen_at).getTime() <= Date.now() - MATCH_QUEUE_STALE_MS) {
     unwrap(await db.from("duel_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("user_id", user.id).eq("status", "waiting"));
-    return send(res, 200, { waiting: false, cancelled: true });
+    return send(res, 200, {
+      waiting: false,
+      cancelled: true,
+      reason: "waiting_timeout",
+      message: "Pencarian lawan sudah timeout. Silakan mulai lagi.",
+    });
   }
 
   unwrap(await db.from("duel_queue").update({
@@ -1384,10 +1422,29 @@ async function matchmakingStatus(res, db, user) {
 }
 
 async function cancelMatchmaking(res, db, user) {
-  unwrap(await db.from("duel_queue").update({
+  const queue = unwrap(await db
+    .from("duel_queue")
+    .select("status, duel_id")
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle());
+
+  if (queue?.status === "matched" && queue.duel_id) {
+    const duel = unwrap(await db.from("duels").select("id, status").eq("id", queue.duel_id).maybeSingle());
+    // Kalau sudah benar-benar matched ke duel aktif, jangan cancel sepihak.
+    // Ini mencegah lawan yang sudah masuk duel tiba-tiba stuck karena row queue dibatalkan.
+    if (duel?.status === "active") {
+      return send(res, 200, { ok: true, alreadyMatched: true, message: "Match sudah terbentuk. Duel akan dimulai." });
+    }
+  }
+
+  await db.from("duel_queue").update({
     status: "cancelled",
+    duel_id: null,
     updated_at: new Date().toISOString(),
-  }).eq("user_id", user.id).eq("status", "waiting"));
+  }).eq("user_id", user.id).in("status", ["waiting", "matched"]);
+
   return send(res, 200, { ok: true });
 }
 

@@ -52,6 +52,9 @@ const state = {
   duelSessionToken: "idle:0",
   duelAdvanceTimers: [],
   duelStatusBusy: false,
+  memberLoadSeq: 0,
+  memberLoading: false,
+  memberSearchTimer: null,
   isMatchmaking: false,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
@@ -833,6 +836,22 @@ function clearDuelAdvanceTimers() {
   state.duelAdvanceTimers = [];
 }
 
+function setButtonLoading(button, loading, label = "Loading...") {
+  if (!button) return;
+  if (!button.dataset.idleText) button.dataset.idleText = button.textContent.trim();
+  button.disabled = Boolean(loading);
+  button.classList.toggle("is-loading", Boolean(loading));
+  button.textContent = loading ? label : button.dataset.idleText;
+}
+
+function setStartDuelLoading(loading, label = "Mencari lawan...") {
+  setButtonLoading($("#startDuelBtn"), loading, label);
+}
+
+function setCancelMatchmakingLoading(loading) {
+  setButtonLoading($("#cancelMatchmakingBtn"), loading, "Membatalkan...");
+}
+
 function bumpDuelSession(prefix = "idle", duelId = "") {
   state.duelSessionSeq = Number(state.duelSessionSeq || 0) + 1;
   state.duelSessionToken = `${prefix}:${duelId || "none"}:${state.duelSessionSeq}`;
@@ -895,6 +914,7 @@ function resetDuelToIdle() {
   $("#duelUserBars").innerHTML = "";
   $("#duelOpponentBars").innerHTML = "";
   setDuelTopMode("idle");
+  setStartDuelLoading(false);
   setMusicMode("idle");
 }
 
@@ -1109,30 +1129,63 @@ function startRequestCountdownTimer() {
   }, 1000);
 }
 
-async function loadMembers() {
+async function loadMembers({ showLoading = true } = {}) {
   normalizeMemberTabs();
-  const q = encodeURIComponent($("#memberSearch").value.trim());
+  const qRaw = $("#memberSearch").value.trim();
+  const q = encodeURIComponent(qRaw);
   const tab = getActiveMemberTab();
-  const cacheKey = `members:${q}:all`;
-  if (state.cache[cacheKey]) {
-    renderMemberList(filterMembersForTab(state.cache[cacheKey].members, tab));
-  } else {
-    $("#requestPanel").innerHTML = `<p class="muted">Memuat request duel...</p>`;
-    $("#memberList").innerHTML = `<p class="muted">Memuat member...</p>`;
+  const loadSeq = ++state.memberLoadSeq;
+  state.memberLoading = true;
+
+  if (showLoading) {
+    showMemberLoading(tab, qRaw);
   }
+
   try {
     const [data, requests] = await Promise.all([
       api(`/api/members?q=${q}&tab=all`),
       loadDuelRequests({ notify: false }),
     ]);
+
+    // Kalau user pindah tab/search saat request lama masih berjalan,
+    // abaikan hasil lama supaya kategori tidak terlihat tertukar.
+    if (loadSeq !== state.memberLoadSeq || tab !== getActiveMemberTab() || qRaw !== $("#memberSearch").value.trim()) {
+      return null;
+    }
+
+    const cacheKey = `members:${q}:all`;
     state.cache[cacheKey] = data;
     renderRequests(requests.requests || [], requests.outgoing || []);
-    renderMemberList(filterMembersForTab(data.members, tab));
+    renderMemberList(filterMembersForTab(data.members || [], tab));
+    return { data, requests };
   } catch (err) {
-    showInlineError($("#requestPanel"), "Request duel belum bisa dimuat.");
-    showInlineError($("#memberList"), `Member gagal dimuat: ${err.message}`);
+    if (loadSeq === state.memberLoadSeq) {
+      showInlineError($("#requestPanel"), "Request duel belum bisa dimuat.");
+      showInlineError($("#memberList"), `Member gagal dimuat: ${err.message}`);
+    }
     throw err;
+  } finally {
+    if (loadSeq === state.memberLoadSeq) state.memberLoading = false;
   }
+}
+
+function memberTabLabel(tab = getActiveMemberTab()) {
+  if (tab === "online") return "member online";
+  if (tab === "favourites") return "member favorit";
+  return "semua member";
+}
+
+function showMemberLoading(tab = getActiveMemberTab(), qRaw = "") {
+  const label = memberTabLabel(tab);
+  const searchText = qRaw ? ` untuk pencarian “${escapeHtml(qRaw)}”` : "";
+  $("#requestPanel").innerHTML = `<p class="muted">Sinkronisasi request duel...</p>`;
+  $("#memberList").innerHTML = `
+    <div class="member-list-loading" aria-live="polite" aria-busy="true">
+      <div class="duel-loading-orb small" aria-hidden="true"></div>
+      <strong>Memuat ${escapeHtml(label)}${searchText}</strong>
+      <small>Mohon tunggu, kategori sedang disaring agar data tidak tertukar.</small>
+    </div>
+  `;
 }
 
 function filterMembersForTab(members, tab) {
@@ -1168,10 +1221,11 @@ function sortMembersForDisplay(members) {
 }
 
 function renderCachedMembersForActiveTab() {
+  if (state.memberLoading) return false;
   const q = encodeURIComponent($("#memberSearch").value.trim());
   const cached = state.cache[`members:${q}:all`];
   if (!cached) return false;
-  renderMemberList(filterMembersForTab(cached.members, getActiveMemberTab()));
+  renderMemberList(filterMembersForTab(cached.members || [], getActiveMemberTab()));
   return true;
 }
 
@@ -1922,19 +1976,26 @@ async function startDuel() {
     toast(`Maaf, Anda sudah mencapai limit duel harian ${dailyLimit}/${dailyLimit}.`);
     return;
   }
+
   state.isMatchmaking = true;
+  setStartDuelLoading(true, "Mencari lawan...");
+
   let data;
   try {
     data = await api("/api/duel/start", { method: "POST" });
   } catch (err) {
     state.isMatchmaking = false;
+    setStartDuelLoading(false);
     throw err;
   }
+
   if (data.duel) {
     state.isMatchmaking = false;
+    setStartDuelLoading(false);
     beginDuel(data.duel);
     return;
   }
+
   showMatchmakingRoom(data.message);
   startMatchmakingWatcher();
 }
@@ -1945,6 +2006,7 @@ function showMatchmakingRoom(message = "Menunggu lawan online. Jangan tutup hala
   $("#duelResult").classList.remove("is-hidden");
   setDuelTopMode("result");
   $("#duelResult").innerHTML = `
+    <div class="duel-loading-orb" aria-hidden="true"></div>
     <p class="eyebrow">Ruang Tunggu</p>
     <h1>Mencari Lawan...</h1>
     <p class="result-copy">${escapeHtml(message)}</p>
@@ -1976,7 +2038,7 @@ function startMatchmakingWatcher() {
         state.isMatchmaking = false;
         clearMatchmakingWatcher();
         resetDuelToIdle();
-        toast("Pencarian lawan dibatalkan atau sudah timeout.");
+        toast(data.message || "Pencarian lawan dibatalkan atau sudah timeout.");
       }
     } finally {
       state.matchmakingPollBusy = false;
@@ -1985,6 +2047,7 @@ function startMatchmakingWatcher() {
 }
 
 async function cancelMatchmaking() {
+  setCancelMatchmakingLoading(true);
   state.isMatchmaking = false;
   clearMatchmakingWatcher();
   await api("/api/duel/matchmaking/cancel", { method: "POST" }).catch(() => {});
@@ -2417,13 +2480,19 @@ function bindEvents() {
     if (!button) return;
     setRegisterGender(button.dataset.gender);
   });
-  $("#memberSearch").addEventListener("input", () => loadMembers().catch((err) => toast(err.message)));
+  $("#memberSearch").addEventListener("input", () => {
+    clearTimeout(state.memberSearchTimer);
+    showMemberLoading(getActiveMemberTab(), $("#memberSearch").value.trim());
+    state.memberSearchTimer = window.setTimeout(() => {
+      loadMembers().catch((err) => toast(err.message));
+    }, 240);
+  });
   $("#memberTab").addEventListener("click", (event) => {
     const button = event.target.closest("[data-member-tab]");
     if (!button) return;
+    if (button.classList.contains("is-active") && !state.memberLoading) return;
     $$("#memberTab [data-member-tab]").forEach((item) => item.classList.toggle("is-active", item === button));
-    renderCachedMembersForActiveTab();
-    loadMembers().catch((err) => toast(err.message));
+    loadMembers({ showLoading: true }).catch((err) => toast(err.message));
   });
   $("#memberList").addEventListener("click", (event) => {
     const relationBtn = event.target.closest("[data-relation]");

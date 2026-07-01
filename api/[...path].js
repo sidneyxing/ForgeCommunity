@@ -17,7 +17,7 @@ const DUEL_SETTLE_GRACE_MS = 15 * 1000;
 const SESSION_DAYS = 180;
 const SESSION_KEEP_PER_USER = 1;
 const DATA_RETENTION_DAYS = 30;
-const APP_TIME_ZONE = "Asia/Makassar";
+const APP_TIME_ZONE = "Asia/Jakarta";
 const DAILY_CATEGORY_QUESTION_COUNT = 5;
 const RESET_CODE_TTL_MS = 15 * 60 * 1000;
 
@@ -1154,16 +1154,36 @@ async function cleanupExpiredDuelRequests(db) {
 
 async function leaderboard(res, db, viewer = null) {
   await cleanupOldWeeklySnapshots(db);
-  const rows = unwrap(await db.from("users").select("id, name, username, gender, lifetime_fp, weekly_fp, wins, total_answer_time_ms, total_answers, fire_streak_days").order("weekly_fp", { ascending: false }).order("lifetime_fp", { ascending: false }).order("created_at", { ascending: true }).limit(200));
-  const ranked = rows.map((row, index) => ({ ...row, rank: index + 1, is_me: row.id === viewer?.id, avg_time: row.total_answers ? `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` : "0s" }));
-  const fire = [...rows].sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0)).slice(0, 1).map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
-  const mostWins = [...rows].sort((a, b) => Number(b.wins || 0) - Number(a.wins || 0)).slice(0, 1).map(({ username, wins }) => ({ username, wins }));
-  const fastest = rows
-    .filter((row) => row.total_answers)
-    .sort((a, b) => (a.total_answer_time_ms / a.total_answers) - (b.total_answer_time_ms / b.total_answers))
-    .slice(0, 1)
-    .map((row) => ({ username: row.username, avg_time: `${(row.total_answer_time_ms / row.total_answers / 1000).toFixed(1)}s` }));
-  const lifetime = [...rows].sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0)).slice(0, 1).map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
+  const rows = unwrap(await db
+    .from("users")
+    .select("id, name, username, gender, lifetime_fp, weekly_fp, fire_streak_days")
+    .order("weekly_fp", { ascending: false })
+    .order("lifetime_fp", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(200));
+
+  const ranked = rows.map((row, index) => ({
+    id: row.id,
+    name: row.name,
+    username: row.username,
+    gender: row.gender,
+    lifetime_fp: Number(row.lifetime_fp || 0),
+    weekly_fp: Number(row.weekly_fp || 0),
+    fire_streak_days: Number(row.fire_streak_days || 0),
+    rank: index + 1,
+    is_me: row.id === viewer?.id,
+  }));
+
+  const fire = [...rows]
+    .sort((a, b) => Number(b.fire_streak_days || 0) - Number(a.fire_streak_days || 0))
+    .slice(0, 3)
+    .map(({ username, fire_streak_days }) => ({ username, fire_streak_days }));
+
+  const lifetime = [...rows]
+    .sort((a, b) => Number(b.lifetime_fp || 0) - Number(a.lifetime_fp || 0))
+    .slice(0, 3)
+    .map(({ username, lifetime_fp }) => ({ username, lifetime_fp }));
+
   const latestSnapshot = unwrap(await db
     .from("weekly_rank_snapshots")
     .select("week_key")
@@ -1191,11 +1211,11 @@ async function leaderboard(res, db, viewer = null) {
 
   return send(res, 200, {
     rows: ranked,
-    legends: { lastWeek: lastWinners, fire, fastest, lifetime, mostWins },
+    legends: { lastWeek: lastWinners, fire, lifetime },
     weekly: {
       currentWeek: weekKey(),
-      recapAt: "Minggu 23:50 WITA",
-      resetAt: "Senin 00:00 WITA",
+      recapAt: "Minggu 23:50 WIB",
+      resetAt: "Senin 00:00 WIB",
       lastWinners,
     },
   });
@@ -1391,12 +1411,45 @@ async function duelQuestions(db, duelId) {
 }
 
 async function duelPayload(db, duel, viewerId) {
-  const questions = await duelQuestions(db, duel.id);
+  const questions = await ensureDuelQuestionSet(db, duel);
   const opponentId = participantSide(duel, viewerId) === "user" ? duel.opponent_id : duel.user_id;
   const opponent = opponentId
     ? unwrap(await db.from("users").select("id, username, gender").eq("id", opponentId).maybeSingle())
     : null;
   return duelPayloadFromQuestions(duel, questions, viewerId, opponent);
+}
+
+async function ensureDuelQuestionSet(db, duel) {
+  let questions = await duelQuestions(db, duel.id);
+  if (questions.length >= DUEL_QUESTION_COUNT) return questions;
+
+  const existingAnswers = await db
+    .from("duel_answers")
+    .select("duel_id", { count: "exact", head: true })
+    .eq("duel_id", duel.id);
+  if (existingAnswers.error) throw existingAnswers.error;
+
+  if (duel.status !== "active" || Number(existingAnswers.count || 0) > 0) {
+    throw Object.assign(new Error("Soal duel tidak lengkap. Duel ini tidak bisa dilanjutkan."), { status: 409 });
+  }
+
+  const selectedQuestions = await dailyDuelQuestions(db);
+  if (selectedQuestions.length < DUEL_QUESTION_COUNT) {
+    throw Object.assign(new Error(`Bank soal minimal ${DUEL_QUESTION_COUNT} pertanyaan belum tersedia.`), { status: 500 });
+  }
+
+  await db.from("duel_questions").delete().eq("duel_id", duel.id);
+  unwrap(await db.from("duel_questions").insert(selectedQuestions.map((question, index) => ({
+    duel_id: duel.id,
+    question_id: question.id,
+    position: index + 1,
+  }))));
+
+  questions = await duelQuestions(db, duel.id);
+  if (questions.length < DUEL_QUESTION_COUNT) {
+    throw Object.assign(new Error("Soal duel gagal dimuat. Coba mulai duel baru."), { status: 500 });
+  }
+  return questions;
 }
 
 function duelPayloadFromQuestions(duel, questions, viewerId, opponent = null) {
@@ -1469,15 +1522,26 @@ async function createDuel(db, user, opponentId = null) {
   const opponent = unwrap(await db.from("users").select("id, username, gender, last_seen_at").eq("id", opponentId).neq("id", user.id).maybeSingle());
   if (!opponent) throw Object.assign(new Error("Lawan tidak ditemukan."), { status: 404 });
   if (!isRecentlyOnline(opponent)) throw Object.assign(new Error("Lawan sedang offline, duel dibatalkan."), { status: 400 });
+
   const duelId = id("duel");
-  unwrap(await db.from("duels").insert({
-    id: duelId,
-    user_id: user.id,
-    opponent_id: opponent.id,
-    opponent_name: opponent.username,
-    starts_at: new Date(Date.now() + DUEL_START_BUFFER_MS).toISOString(),
-  }));
-  unwrap(await db.from("duel_questions").insert(questions.map((question, index) => ({ duel_id: duelId, question_id: question.id, position: index + 1 }))));
+  try {
+    unwrap(await db.from("duels").insert({
+      id: duelId,
+      user_id: user.id,
+      opponent_id: opponent.id,
+      opponent_name: opponent.username,
+      starts_at: new Date(Date.now() + DUEL_START_BUFFER_MS).toISOString(),
+    }));
+    unwrap(await db.from("duel_questions").insert(questions.map((question, index) => ({
+      duel_id: duelId,
+      question_id: question.id,
+      position: index + 1,
+    }))));
+  } catch (error) {
+    await db.from("duels").delete().eq("id", duelId);
+    throw error;
+  }
+
   const duel = unwrap(await db.from("duels").select("*").eq("id", duelId).single());
   return duelPayloadFromQuestions(duel, questions, user.id, opponent);
 }

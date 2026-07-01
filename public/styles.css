@@ -1424,7 +1424,7 @@ select:focus {
 
 .table-head,
 .leader-row {
-  grid-template-columns: 70px minmax(180px, 1fr) 130px 120px 80px 90px;
+  grid-template-columns: 70px minmax(220px, 1fr) 130px 150px;
 }
 
 .table-head {

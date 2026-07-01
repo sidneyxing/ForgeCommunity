@@ -341,7 +341,7 @@ end;
 $$;
 
 create or replace function public.generate_daily_question_pool(
-  p_pool_date date default (now() at time zone 'Asia/Makassar')::date,
+  p_pool_date date default (now() at time zone 'Asia/Jakarta')::date,
   p_per_category integer default 5,
   p_force_regenerate boolean default false
 )
@@ -448,7 +448,7 @@ end;
 $$;
 
 create or replace function public.get_daily_duel_question_ids(
-  p_pool_date date default (now() at time zone 'Asia/Makassar')::date,
+  p_pool_date date default (now() at time zone 'Asia/Jakarta')::date,
   p_limit integer default 5
 )
 returns text[]
@@ -516,8 +516,8 @@ declare
   v_user_today integer;
   v_pool_date date;
 begin
-  -- Asia/Makassar keeps FORGE's Sulut daily rotation aligned with local midnight.
-  v_pool_date := coalesce((p_day_start at time zone 'Asia/Makassar')::date, (now() at time zone 'Asia/Makassar')::date);
+  -- Asia/Jakarta keeps FORGE daily rotation aligned with WIB midnight.
+  v_pool_date := coalesce((p_day_start at time zone 'Asia/Jakarta')::date, (now() at time zone 'Asia/Jakarta')::date);
   p_question_ids := public.get_daily_duel_question_ids(v_pool_date, 5);
 
   v_question_count := coalesce(array_length(p_question_ids, 1), 0);

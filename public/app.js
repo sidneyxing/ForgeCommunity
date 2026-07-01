@@ -14,6 +14,8 @@ const state = {
   duelOpponentAnswers: [],
   duelOpponentAnsweredCount: 0,
   duelAnswerSaves: [],
+  duelAnswerPayloads: [],
+  finishingDuelId: null,
   answerLocked: false,
   duelTimer: null,
   resultCountdownTimer: null,
@@ -769,6 +771,8 @@ function resetDuelProgress(duel) {
   state.duelOpponentAnswers = Array(duel.questions.length).fill(null);
   state.duelOpponentAnsweredCount = 0;
   state.duelAnswerSaves = [];
+  state.duelAnswerPayloads = [];
+  state.finishingDuelId = null;
   state.answerLocked = false;
   state.renderedResultDuelId = null;
   state.isMatchmaking = false;
@@ -837,6 +841,8 @@ function resetDuelToIdle() {
   state.duelOpponentAnswers = [];
   state.duelOpponentAnsweredCount = 0;
   state.duelAnswerSaves = [];
+  state.duelAnswerPayloads = [];
+  state.finishingDuelId = null;
   state.answerLocked = false;
   $("#duelIdle").classList.remove("is-hidden");
   $("#duelActive").classList.add("is-hidden");
@@ -1443,6 +1449,13 @@ async function respondDuelRequest(button) {
 
 function beginDuel(duel) {
   syncServerClock(duel.server_now);
+  if (!Array.isArray(duel?.questions) || duel.questions.length < 5) {
+    recoverDuelStart(duel).catch((err) => {
+      resetDuelToIdle();
+      toast(err.message || "Soal duel gagal dimuat. Coba mulai duel baru.");
+    });
+    return;
+  }
   clearResultCountdown();
   clearMatchmakingWatcher();
   clearDuelStartTimer();
@@ -1466,6 +1479,26 @@ function beginDuel(duel) {
   subscribeDuelChannel(duel.id);
   startDuelStatusWatcher();
   startSyncedDuelCountdown();
+}
+
+async function recoverDuelStart(duel) {
+  if (!duel?.id) throw new Error("Duel tidak valid dari server.");
+  showPage("duel");
+  $("#duelIdle").classList.add("is-hidden");
+  $("#duelActive").classList.add("is-hidden");
+  $("#duelResult").classList.remove("is-hidden");
+  setDuelTopMode("result");
+  $("#duelResult").innerHTML = `
+    <div class="duel-loading-orb" aria-hidden="true"></div>
+    <p class="eyebrow">Memuat duel</p>
+    <h1>Loading...</h1>
+    <p class="result-copy">Soal sedang disinkronkan ulang dari server.</p>
+  `;
+  const data = await api(`/api/duel/${duel.id}`);
+  if (!Array.isArray(data.duel?.questions) || data.duel.questions.length < 5) {
+    throw new Error("Soal duel belum lengkap dari server. Duel dibatalkan agar tidak stuck di loading.");
+  }
+  beginDuel(data.duel);
 }
 
 function startSyncedDuelCountdown() {
@@ -1529,7 +1562,7 @@ function subscribeDuelChannel(duelId) {
       applyOpponentAnswerPayload(payload);
       refreshDuelStatus().catch(() => {});
     })
-    .on("broadcast", { event: "finish" }, () => finishDuel({ fromSync: true }).catch(() => {}))
+    .on("broadcast", { event: "finish" }, () => refreshDuelStatus().catch(() => {}))
     .subscribe();
 }
 
@@ -1567,7 +1600,7 @@ async function refreshDuelStatus() {
     renderDuelProgress();
   }
   if (status?.status === "finished" && state.duel) {
-    await finishDuel({ fromSync: true });
+    await finishDuel({ fromSync: true, forceResult: true });
   }
 }
 
@@ -1596,8 +1629,6 @@ function renderLeaderboard(data) {
       <div class="leader-player"><span class="avatar-ring" style="--avatar-color:${profileColor(row)}"><img src="${avatar(row)}" alt="" /></span><span><strong>${row.name}</strong><small>@${row.username}</small></span></div>
       <span>${levelName(row.lifetime_fp)}</span>
       <strong>${fpDisplay(row.weekly_fp)}</strong>
-      <span>${row.wins}</span>
-      <span>${row.avg_time}</span>
     </article>
   `).join("") || `<p class="muted">Belum ada data peringkat.</p>`;
 
@@ -1616,9 +1647,7 @@ function renderLeaderboard(data) {
   $("#hallOfLegends").innerHTML = `
     ${topList("Top 3 Last Week", data.legends?.lastWeek || data.weekly?.lastWinners || [], (row) => `${fpDisplay(row.weekly_fp)} minggu lalu`)}
     ${topList("Fire Streak Terbanyak", data.legends?.fire || [], (row) => `${row.fire_streak_days || 0} hari menyala`)}
-    ${topList("Ronde Tercepat", data.legends?.fastest || [], (row) => `${row.avg_time || "0s"} rata-rata`)}
     ${topList("Lifetime FP Terbanyak", data.legends?.lifetime || [], (row) => fpDisplay(row.lifetime_fp))}
-    ${topList("Menang Terbanyak", data.legends?.mostWins || [], (row) => `${row.wins || 0} kemenangan`)}
   `;
 }
 
@@ -1729,7 +1758,7 @@ function renderAbout() {
     ["Forge Points", `<span class="about-fp-line"><span class="fp-diamond" aria-hidden="true"></span><span>Forge Points adalah poin progres utama. FP duel maksimal 100; jawaban benar mendapat nilai berdasarkan sisa waktu, lalu total duel dinormalisasi ke skala 0-100.</span></span>`],
     ["Cara Duel", `Setiap duel berisi 5 soal, masing-masing 10 detik. Maksimal ${dailyLimit} duel per hari.`],
     ["Sistem Level", `Level 1 sampai Level 100. Setiap ${fpDisplay(1000)} lifetime naik 1 level.`],
-    ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WITA, lalu weekly <span class="about-fp-name"><span class="fp-diamond" aria-hidden="true"></span>Forge Points</span> reset Senin 00:00 WITA.`],
+    ["Hadiah Mingguan", `Recap juara idealnya Minggu 23:50 WIB, lalu weekly <span class="about-fp-name"><span class="fp-diamond" aria-hidden="true"></span>Forge Points</span> reset Senin 00:00 WIB.`],
     ["WhatsApp Komunitas", "Gunakan contact person footer untuk masuk grup atau koordinasi duel."],
     ["Fire Streak", `Mainkan minimal satu duel setiap hari untuk menjaga Fire Streak. Jika sehari tidak bermain, streak akan kembali ke 0.`],
     ["Masih Bingung?", "Silakan bertanya atau hubungi admin melalui contact person di footer."],
@@ -1942,10 +1971,12 @@ async function answerQuestion(option) {
     if (option && btn.dataset.option === option && !isCorrect) btn.classList.add("wrong");
   });
   playSound(isCorrect ? "correct" : "wrong");
+  const answerPayload = { duelId: state.duel.id, questionId: question.id, selectedOption: option, answerTimeMs: timeMs };
+  state.duelAnswerPayloads.push(answerPayload);
   state.duelAnswerSaves.push(api("/api/duel/answer", {
     method: "POST",
-    body: { duelId: state.duel.id, questionId: question.id, selectedOption: option, answerTimeMs: timeMs },
-  }));
+    body: answerPayload,
+  }).then(() => ({ ok: true })).catch((error) => ({ ok: false, error })));
   state.duelChannel?.send({
     type: "broadcast",
     event: "answer",
@@ -1982,11 +2013,80 @@ function showDuelCalculatingResult(message = "Menghitung hasil duel...") {
   `;
 }
 
-async function finishDuel({ fromSync = false } = {}) {
+function localAnsweredCount() {
+  return state.duelUserAnswers.filter((value) => value !== null).length;
+}
+
+async function flushDuelAnswerSaves() {
+  const saves = [...state.duelAnswerSaves];
+  if (saves.length) {
+    const settled = await Promise.all(saves);
+    if (settled.every((item) => item?.ok !== false)) return;
+  }
+
+  const payloads = [...state.duelAnswerPayloads];
+  if (!payloads.length) return;
+
+  state.duelAnswerSaves = payloads.map((payload) => api("/api/duel/answer", {
+    method: "POST",
+    body: payload,
+  }));
+  const retrySettled = await Promise.allSettled(state.duelAnswerSaves);
+  const failed = retrySettled.find((item) => item.status === "rejected");
+  if (failed) {
+    throw failed.reason || new Error("Jawaban belum berhasil tersimpan.");
+  }
+}
+
+function restoreActiveQuestionAfterFinishError() {
+  if (!state.duel?.id || state.duelIndex >= state.duel.questions.length) return;
+  $("#duelResult")?.classList.add("is-hidden");
+  $("#duelActive")?.classList.remove("is-hidden");
+  setDuelTopMode("active");
+}
+
+async function finishDuel({ fromSync = false, forceResult = false } = {}) {
   if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+
+  const duelId = state.duel.id;
+  if (state.finishingDuelId === duelId) return;
+
+  if (fromSync && !forceResult && localAnsweredCount() < state.duel.questions.length) {
+    refreshDuelStatus().catch(() => {});
+    return;
+  }
+
+  state.finishingDuelId = duelId;
   showDuelCalculatingResult(fromSync ? "Sinkronisasi hasil dari lawan..." : "Jawaban kamu sedang disimpan. Mohon tunggu sebentar.");
-  await Promise.all(state.duelAnswerSaves);
-  const data = await api("/api/duel/finish", { method: "POST", body: { duelId: state.duel.id } });
+
+  let data;
+  try {
+    await flushDuelAnswerSaves();
+    data = await api("/api/duel/finish", { method: "POST", body: { duelId } });
+  } catch (err) {
+    state.finishingDuelId = null;
+    if (/jawab semua pertanyaan/i.test(err.message || "")) {
+      restoreActiveQuestionAfterFinishError();
+      toast("Lanjutkan duel sampai semua soal terjawab.");
+      return;
+    }
+    $("#duelResult").classList.remove("is-hidden");
+    $("#duelActive").classList.add("is-hidden");
+    setDuelTopMode("result");
+    $("#duelResult").innerHTML = `
+      <p class="eyebrow">Duel belum selesai</p>
+      <h1>Gagal Sync</h1>
+      <p class="result-copy">${escapeHtml(err.message || "Hasil duel belum bisa disimpan.")}</p>
+      <div class="duel-result-actions">
+        <button class="btn primary" id="retryFinishDuelBtn">Coba Lagi</button>
+        <button class="btn secondary" id="backHomeBtn">Kembali ke Beranda</button>
+      </div>
+    `;
+    return;
+  } finally {
+    if (!data || data.waiting) state.finishingDuelId = null;
+  }
+
   if (data.waiting) {
     $("#duelActive").classList.add("is-hidden");
     $("#duelResult").classList.remove("is-hidden");
@@ -1999,9 +2099,12 @@ async function finishDuel({ fromSync = false } = {}) {
     startDuelStatusWatcher();
     return;
   }
+
   const result = data.result;
-  if (state.renderedResultDuelId === state.duel.id) return;
-  state.renderedResultDuelId = state.duel.id;
+  if (state.renderedResultDuelId === duelId) return;
+  state.renderedResultDuelId = duelId;
+  state.finishingDuelId = null;
+
   const nextLifetimeFp = Number(state.me.lifetime_fp || 0) + Number(result.fpAwarded || 0);
   const nextWeeklyFp = Number(state.me.weekly_fp || 0) + Number(result.fpAwarded || 0);
   const previousLevel = levelName(state.me.lifetime_fp);
@@ -2042,15 +2145,15 @@ async function finishDuel({ fromSync = false } = {}) {
     state.duelChannel?.send({
       type: "broadcast",
       event: "finish",
-      payload: { duelId: state.duel.id },
+      payload: { duelId },
     }).catch(() => {});
   }
   if (didLevelUp) toast(`Selamat, kamu naik ke ${nextLevel}.`);
   for (const badge of result.newBadges || []) {
     showBadgeUnlockNotification(badge);
   }
-  if (state.resultSoundPlayedDuelIds.has(state.duel.id)) return;
-  state.resultSoundPlayedDuelIds.add(state.duel.id);
+  if (state.resultSoundPlayedDuelIds.has(duelId)) return;
+  state.resultSoundPlayedDuelIds.add(duelId);
   if (result.result === "win") {
     playSound("win", { overlap: true });
     $("#duelPanel").classList.add("win-glow");
@@ -2203,6 +2306,7 @@ function bindEvents() {
   });
   $("#duelResult").addEventListener("click", (event) => {
     if (event.target.closest("#cancelMatchmakingBtn")) cancelMatchmaking().catch((err) => toast(err.message));
+    if (event.target.closest("#retryFinishDuelBtn")) finishDuel({ forceResult: true }).catch((err) => toast(err.message));
     if (event.target.closest("#rematchCountdownBtn")) resetDuelToIdle();
     if (event.target.closest("#backHomeBtn")) {
       resetDuelToIdle();

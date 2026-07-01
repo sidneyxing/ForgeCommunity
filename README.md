@@ -4,7 +4,7 @@
 
 FORGE adalah web app komunitas untuk duel quiz realtime, Forge Points, Fire Streak, Weekly Leaderboard, Achievement Badge, dan Member Arena.
 
-Versi ini sudah dirapikan supaya logic soal harian tidak lagi bergantung pada frontend. Tampilan UI/UX tetap memakai file `public/index.html`, `public/styles.css`, dan `public/app.js` yang sama; perubahan utama ada di database function dan API matchmaking.
+Sistem ini dibuat dengan frontend static, API serverless di Vercel, dan database Supabase. Logic duel, limit harian, question pool, dan weekly leaderboard dikendalikan dari backend/database supaya hasilnya konsisten di semua device.
 
 ---
 
@@ -15,19 +15,31 @@ Versi ini sudah dirapikan supaya logic soal harian tidak lagi bergantung pada fr
 - Register akun dengan nama, username, WhatsApp, email, kota, gender, dan password.
 - Login menggunakan session token.
 - Change password dari halaman Settings.
-- Admin reset password lewat endpoint khusus jika `ADMIN_USERS` dan `ADMIN_RESET_KEY` sudah diisi.
+- Admin reset password melalui endpoint khusus jika `ADMIN_USERS` dan `ADMIN_RESET_KEY` sudah diisi.
+- Bantuan lupa password sementara diarahkan ke WhatsApp admin sampai email sender siap.
 
-### 2. Multiplayer Duel
+### 2. Member Arena
 
-- User menekan **Mulai Duel**.
+- Menampilkan semua member FORGE.
+- Status online dihitung dari `last_seen_at`.
+- User bisa menandai member favorit.
+- User bisa invite duel langsung dari halaman Members.
+- Tombol invite memiliki status pending agar user tidak menekan invite berkali-kali.
+
+### 3. Multiplayer Duel
+
+- User menekan **Mulai Duel** untuk masuk matchmaking.
 - API memasukkan user ke `duel_queue`.
-- Jika ada lawan online, database membuat duel realtime 1 vs 1.
-- Setiap duel memakai 5 soal dari `daily_question_pool` hari itu.
-- Timer dan tampilan duel tetap di-handle oleh frontend.
+- Jika ada lawan online, database membuat duel 1 vs 1.
+- Dua player masuk ke room duel yang sama.
+- Duel memakai 5 soal dari question pool harian.
+- Setiap soal memiliki timer 10 detik.
+- Jawaban disimpan ke `duel_answers`.
+- Hasil duel dihitung setelah kedua player selesai atau setelah melewati deadline.
 
-### 3. Daily Question Pool
+### 4. Daily Question Pool
 
-Logic baru:
+Daily pool dibuat otomatis berdasarkan tanggal WIB.
 
 ```text
 questions
@@ -62,23 +74,35 @@ Bahasa Inggris
 
 Aturan penting:
 
-- `questions.active` tetap menjadi kontrol admin.
-- `questions.used_in_pool` menjadi penanda soal sudah pernah masuk pool harian.
-- Saat 50 soal masuk pool, `used_in_pool = true`.
-- Soal dengan `used_in_pool = true` tidak akan masuk pool lagi pada hari berikutnya.
-- Jika stok unused sudah habis, function otomatis mulai siklus baru dengan reset `used_in_pool = false` untuk soal aktif.
-- Pool bersifat **self-healing**: kalau hari ini belum ada pool, Start Duel pertama akan otomatis membuat pool.
+- `questions.active` adalah kontrol admin untuk mengaktifkan atau mematikan soal.
+- `questions.used_in_pool` adalah penanda rotasi pool harian.
+- Saat soal masuk daily pool, `used_in_pool = true`.
+- Soal dengan `used_in_pool = true` tidak masuk pool berikutnya sampai stok kategori habis.
+- Jika stok unused habis, sistem otomatis memulai siklus baru dengan reset `used_in_pool = false` untuk soal aktif.
+- Pool bersifat self-healing: jika pool hari ini belum ada, Start Duel pertama otomatis membuat pool.
 
-### 4. Forge Points & Badge
+### 5. Limit Harian & Reset WIB
+
+- Maksimal duel harian: 7 duel per user.
+- Perhitungan **Duel Hari Ini** reset setiap **00:00 WIB**.
+- Fire Streak memakai tanggal WIB.
+- Daily question pool memakai tanggal WIB.
+- Weekly leaderboard reset setiap **Senin 00:00 WIB**.
+
+### 6. Forge Points & Badge
 
 - FP dihitung berdasarkan jawaban benar dan kecepatan menjawab.
+- Lifetime FP disimpan di `users.lifetime_fp`.
+- Weekly FP disimpan di `users.weekly_fp`.
 - Badge terbuka dari jumlah duel, kemenangan, win streak, lifetime FP, kategori jawaban benar, dan weekly rank.
 
-### 5. Leaderboard & Hall of Legends
+### 7. Leaderboard & Hall of Legends
 
+- Leaderboard utama menampilkan Rank, Pemain, Level, dan FP Mingguan.
 - Weekly leaderboard memakai `weekly_fp`.
 - Lifetime progress memakai `lifetime_fp`.
 - Weekly snapshot disimpan di `weekly_rank_snapshots`.
+- Hall of Legends menampilkan Top 3 Last Week, Fire Streak, dan Lifetime FP.
 
 ---
 
@@ -102,7 +126,7 @@ forge-community/
 │   ├── schema.sql
 │   ├── run_existing_database_update.sql
 │   └── migrations/
-│       └── 20260629_self_healing_daily_pool.sql
+│       └── 20260702_wib_reset_and_duel_stability.sql
 │
 ├── scripts/
 │   └── check-static.mjs
@@ -116,7 +140,7 @@ forge-community/
 
 ---
 
-## Penjelasan Tiap File
+## Penjelasan File Utama
 
 ### `api/[...path].js`
 
@@ -124,20 +148,13 @@ Main backend router untuk semua endpoint `/api/*`.
 
 Tugas utama:
 
-- Membaca path API dari Vercel rewrite.
 - Auth: register, login, logout, session check.
 - Account: profile, settings, change password, admin reset password.
 - Members: list member, online status, favorite member, invite duel.
 - Duel: matchmaking, get duel, answer, finish, status sync.
 - Leaderboard dan badge.
+- Daily reset, Fire Streak, dan weekly reset berdasarkan WIB.
 - Memanggil Supabase RPC untuk daily question pool dan matchmaking.
-
-Catatan update:
-
-- `startDuel()` sekarang tidak memilih soal di frontend/API.
-- `joinMatchmaking()` menyerahkan pemilihan soal ke RPC `match_duel_queue()`.
-- `dailyDuelQuestions()` mengambil 5 soal dari RPC `get_daily_duel_question_ids()`.
-- Tidak ada lagi logic API yang mengubah `questions.active = false`.
 
 ### `api/data.js`
 
@@ -147,12 +164,9 @@ Tugas utama:
 
 - Menyediakan `seedQuestions`.
 - Menyediakan daftar badge.
-- Dipakai oleh `ensureSeed()` di backend saat tabel masih kosong.
+- Dipakai oleh `ensureSeed()` saat tabel masih kosong.
 
-Catatan:
-
-- Untuk produksi, soal utama tetap lebih baik dimasukkan langsung ke table `questions` di Supabase.
-- Seeder ini hanya cadangan agar project baru tidak benar-benar kosong.
+Untuk produksi, soal utama tetap lebih baik dikelola langsung dari table `questions` di Supabase.
 
 ### `public/index.html`
 
@@ -164,10 +178,6 @@ Tugas utama:
 - App shell: sidebar, topbar, home, duel, members, leaderboard, badge, about, settings.
 - Elemen-elemen dengan `id` yang dikontrol oleh `public/app.js`.
 
-Catatan:
-
-- Tidak ada perubahan UI/UX utama di file ini.
-
 ### `public/styles.css`
 
 Seluruh styling FORGE.
@@ -176,10 +186,6 @@ Tugas utama:
 
 - Warna brand, layout, responsive mobile, card, sidebar, duel arena, leaderboard, badge, settings.
 - Style Forge Points diamond, avatar, Fire Streak, modal, dan toast.
-
-Catatan:
-
-- File ini dipertahankan supaya tampilan tidak berubah.
 
 ### `public/app.js`
 
@@ -190,35 +196,9 @@ Tugas utama:
 - Fetch API.
 - Menyimpan session token di localStorage.
 - Render dashboard, member list, leaderboard, badge, settings.
-- Menjalankan UI duel: timer, jawaban, progress bar, result screen.
+- Menjalankan UI duel: countdown start, timer soal, jawaban, progress bar, waiting result, result screen.
 - Realtime event memakai Supabase Realtime.
 - Audio background dan sound effect.
-
-Catatan:
-
-- UI flow tetap sama.
-- Pemilihan soal harian tidak ada di frontend; frontend hanya menerima duel yang sudah dibuat oleh backend/database.
-
-### `public/sw.js`
-
-Service worker untuk Progressive Web App.
-
-Tugas utama:
-
-- Cache shell assets: HTML, CSS, JS, manifest, logo.
-- Menghindari cache untuk route `/api/*`.
-- Membantu app tetap cepat saat dibuka ulang.
-
-### `public/manifest.webmanifest`
-
-Konfigurasi PWA.
-
-Tugas utama:
-
-- Nama aplikasi.
-- Icon aplikasi.
-- Warna tema.
-- Mode display saat ditambahkan ke home screen.
 
 ### `supabase/schema.sql`
 
@@ -233,7 +213,7 @@ Tugas utama:
 - Membuat function matchmaking.
 - Membuat helper cleanup weekly snapshot.
 
-Gunakan file ini hanya untuk database baru/kosong.
+Gunakan file ini untuk database baru/kosong.
 
 ### `supabase/run_existing_database_update.sql`
 
@@ -241,80 +221,27 @@ Migration aman untuk database yang sudah aktif.
 
 Tugas utama:
 
-- Menambah `questions.used_in_pool` jika belum ada.
-- Menambah `questions.last_pooled_date` jika belum ada.
-- Mengembalikan `active = true` untuk soal yang sempat dibuat false oleh logic lama.
-- Membuat ulang function daily pool dan matchmaking versi baru.
+- Menyesuaikan function daily pool ke WIB.
+- Menyesuaikan function matchmaking ke WIB.
+- Memastikan kolom daily pool tersedia.
+- Mengembalikan `questions.active = true` untuk soal yang sempat dibuat false oleh logic lama.
+- Menjaga reset harian dan weekly leaderboard berdasarkan WIB.
 
-Gunakan file ini untuk project kamu sekarang.
-
-### `supabase/migrations/20260629_self_healing_daily_pool.sql`
-
-Isi sama dengan `run_existing_database_update.sql`, tetapi disimpan sebagai migration historis.
-
-Tugas utama:
-
-- Dokumentasi perubahan database.
-- Bisa dipakai kalau nanti project memakai sistem migration yang lebih rapi.
-
-### `scripts/check-static.mjs`
-
-Script pengecekan file penting.
-
-Tugas utama:
-
-- Memastikan file utama frontend, API, dan schema ada.
-- Dipanggil oleh `npm run check`.
-
-### `package.json`
-
-Konfigurasi Node/Vercel project.
-
-Tugas utama:
-
-- Menentukan dependency: `@supabase/supabase-js`.
-- Script local dev: `npm run local`.
-- Script deploy: `npm run deploy`.
-- Script check: `npm run check`.
-
-### `vercel.json`
-
-Konfigurasi Vercel.
-
-Tugas utama:
-
-- Rewrite semua `/api/*` ke `api/[...path].js`.
-- Header khusus untuk `manifest.webmanifest`.
-
-### `.env.example`
-
-Template environment variables.
-
-Tugas utama:
-
-- Daftar variable yang perlu diisi di `.env.local` atau Vercel Environment Variables.
-
-### `.gitignore`
-
-Daftar file/folder yang tidak perlu masuk Git.
-
-Tugas utama:
-
-- Mengabaikan `node_modules`, `.vercel`, dan file `.env` lokal.
+Gunakan file ini untuk project yang sudah berjalan.
 
 ---
 
 ## Cara Update Project Aktif
 
-### 1. Backup dulu
+### 1. Backup project dan database
 
-Sebelum replace file, backup project dan database.
+Backup folder project dan export database sebelum replace file.
 
 ### 2. Replace file code
 
 Copy isi ZIP ini ke project kamu.
 
-Folder assets lama tetap dipakai:
+Folder asset lama tetap dipakai:
 
 ```text
 public/image/
@@ -333,11 +260,20 @@ Di Supabase SQL Editor, jalankan:
 supabase/run_existing_database_update.sql
 ```
 
-### 4. Test generate pool hari ini
+### 4. Test tanggal WIB
+
+```sql
+select
+  now() as utc_time,
+  now() at time zone 'Asia/Jakarta' as wib_time,
+  (now() at time zone 'Asia/Jakarta')::date as wib_date;
+```
+
+### 5. Test generate pool hari ini
 
 ```sql
 select public.generate_daily_question_pool(
-  (now() at time zone 'Asia/Makassar')::date,
+  (now() at time zone 'Asia/Jakarta')::date,
   5,
   false
 );
@@ -348,7 +284,7 @@ Cek total:
 ```sql
 select count(*)
 from public.daily_question_pool
-where pool_date = (now() at time zone 'Asia/Makassar')::date;
+where pool_date = (now() at time zone 'Asia/Jakarta')::date;
 ```
 
 Harusnya `50`.
@@ -358,26 +294,39 @@ Cek per kategori:
 ```sql
 select category_key, count(*)
 from public.daily_question_pool
-where pool_date = (now() at time zone 'Asia/Makassar')::date
+where pool_date = (now() at time zone 'Asia/Jakarta')::date
 group by category_key
 order by category_key;
 ```
 
 Harusnya masing-masing `5`.
 
-### 5. Test start duel
+### 6. Test start duel
 
 Minimal perlu 2 akun online.
-
-Alur:
 
 ```text
 Akun A klik Mulai Duel
 Akun B klik Mulai Duel
 Database match otomatis
 Duel dibuat
-5 soal random masuk duel_questions
+5 soal masuk duel_questions
+Kedua player melihat countdown yang sama
+Soal muncul setelah countdown selesai
 ```
+
+### 7. Test reset harian
+
+Setelah lewat 00:00 WIB:
+
+```sql
+select count(*)
+from public.duels
+where status <> 'cancelled'
+  and started_at >= date_trunc('day', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta';
+```
+
+Duel sebelum 00:00 WIB tidak boleh ikut masuk hitungan hari baru.
 
 ---
 
@@ -385,17 +334,17 @@ Duel dibuat
 
 Karena pool sudah self-healing, cron tidak wajib.
 
-Namun kalau ingin pool dibuat otomatis setiap jam 00.00 WITA, bisa pakai Supabase cron:
+Jika ingin pool dibuat otomatis setiap **00:00 WIB**, gunakan Supabase cron:
 
 ```sql
 create extension if not exists pg_cron;
 
 select cron.schedule(
-  'forge-generate-daily-question-pool-midnight-wita',
-  '0 16 * * *',
+  'forge-generate-daily-question-pool-midnight-wib',
+  '0 17 * * *',
   $$
   select public.generate_daily_question_pool(
-    (now() at time zone 'Asia/Makassar')::date,
+    (now() at time zone 'Asia/Jakarta')::date,
     5,
     false
   );
@@ -406,7 +355,7 @@ select cron.schedule(
 Penjelasan:
 
 ```text
-00.00 WITA = 16.00 UTC hari sebelumnya
+00:00 WIB = 17:00 UTC hari sebelumnya
 ```
 
 ---
@@ -425,7 +374,7 @@ Jalankan lokal:
 npm run local
 ```
 
-Cek syntax:
+Cek file static dan syntax:
 
 ```bash
 npm run check
@@ -461,7 +410,7 @@ SUPABASE_ANON_KEY=
 
 ```bash
 git add .
-git commit -m "clean daily question pool architecture"
+git commit -m "stabilize duel flow and align reset to WIB"
 git push
 ```
 
@@ -471,12 +420,13 @@ Vercel akan deploy otomatis jika repository sudah tersambung.
 
 ## Catatan Penting
 
-1. Jangan filter soal duel dengan `questions.active = true` dari frontend.
-2. Soal duel harus mengikuti `duel_questions` yang sudah dibuat database.
-3. `active` dipakai admin untuk mematikan soal.
-4. `used_in_pool` dipakai sistem untuk rotasi soal harian.
-5. Daily pool lama tidak perlu dihapus; setiap tanggal punya pool sendiri.
-6. Kalau semua soal sudah pernah masuk pool, sistem otomatis memulai siklus baru.
+1. Jangan memilih soal duel dari frontend.
+2. Soal duel harus mengikuti `duel_questions` yang dibuat backend/database.
+3. `questions.active` dipakai admin untuk mematikan soal.
+4. `questions.used_in_pool` dipakai sistem untuk rotasi daily pool.
+5. Daily reset memakai WIB, bukan timezone server Vercel.
+6. Weekly leaderboard reset setiap Senin 00:00 WIB.
+7. Jika semua soal sudah pernah masuk pool, sistem otomatis memulai siklus baru.
 
 ---
 

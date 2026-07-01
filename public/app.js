@@ -48,6 +48,10 @@ const state = {
   matchmakingTimer: null,
   duelStartTimer: null,
   duelStartCountdownLastSecond: null,
+  duelSessionSeq: 0,
+  duelSessionToken: "idle:0",
+  duelAdvanceTimers: [],
+  duelStatusBusy: false,
   isMatchmaking: false,
   seenRequestIds: new Set(),
   acceptedRequestIds: new Set(),
@@ -342,7 +346,7 @@ async function respondDuelRequestById(requestId, action = "accept") {
     body: { action },
   });
   await loadDuelRequests({ notify: false });
-  if (data.duel) {
+  if (data.duel?.status === "active") {
     state.realtimeClient?.channel(`forge-user-${data.duel.opponent_id || ""}`).send({
       type: "broadcast",
       event: "duel-accepted",
@@ -769,6 +773,8 @@ function distributeScore(score, total = 5) {
 }
 
 function resetDuelProgress(duel) {
+  bumpDuelSession("duel", duel?.id || "new");
+  clearDuelAdvanceTimers();
   state.duelIndex = 0;
   state.duelUserAnswers = Array(duel.questions.length).fill(null);
   state.duelOpponentAnswers = Array(duel.questions.length).fill(null);
@@ -822,6 +828,39 @@ function clearDuelStartTimer() {
   state.duelStartCountdownLastSecond = null;
 }
 
+function clearDuelAdvanceTimers() {
+  for (const timer of state.duelAdvanceTimers || []) window.clearTimeout(timer);
+  state.duelAdvanceTimers = [];
+}
+
+function bumpDuelSession(prefix = "idle", duelId = "") {
+  state.duelSessionSeq = Number(state.duelSessionSeq || 0) + 1;
+  state.duelSessionToken = `${prefix}:${duelId || "none"}:${state.duelSessionSeq}`;
+  return state.duelSessionToken;
+}
+
+function isCurrentDuelSession(duelId, sessionToken = state.duelSessionToken) {
+  return Boolean(state.duel?.id && state.duel.id === duelId && state.duelSessionToken === sessionToken);
+}
+
+function isActiveDuelSession(duelId, sessionToken = state.duelSessionToken) {
+  return isCurrentDuelSession(duelId, sessionToken) && state.renderedResultDuelId !== duelId;
+}
+
+function stopDuelRuntimeTimers({ bumpSession = false } = {}) {
+  clearResultCountdown();
+  clearMatchmakingWatcher();
+  clearDuelStartTimer();
+  clearDuelAdvanceTimers();
+  clearInterval(state.duelTimer);
+  clearInterval(state.duelStatusTimer);
+  state.duelTimer = null;
+  state.duelStatusTimer = null;
+  state.duelStatusBusy = false;
+  state.questionTimerToken += 1;
+  if (bumpSession) bumpDuelSession("idle");
+}
+
 function setDuelTopMode(mode) {
   const active = mode === "active";
   $("#duelTopLogo").classList.toggle("is-hidden", active || mode === "result");
@@ -830,12 +869,7 @@ function setDuelTopMode(mode) {
 }
 
 function resetDuelToIdle() {
-  clearResultCountdown();
-  clearMatchmakingWatcher();
-  clearDuelStartTimer();
-  clearInterval(state.duelTimer);
-  clearInterval(state.duelStatusTimer);
-  state.duelStatusTimer = null;
+  stopDuelRuntimeTimers({ bumpSession: true });
   if (state.realtimeClient && state.duelChannel) {
     state.realtimeClient.removeChannel(state.duelChannel);
     state.duelChannel = null;
@@ -1003,7 +1037,7 @@ async function initRealtime() {
     .on("broadcast", { event: "duel-accepted" }, async ({ payload }) => {
       if (!payload?.duelId) return;
       const data = await api(`/api/duel/${payload.duelId}`).catch(() => null);
-      if (data?.duel) beginDuel(data.duel);
+      if (data?.duel?.status === "active") beginDuel(data.duel);
     })
     .subscribe();
 }
@@ -1033,7 +1067,7 @@ async function loadDuelRequests({ notify = false } = {}) {
       if (request.status === "accepted" && request.duel_id && !state.acceptedRequestIds.has(request.id)) {
         state.acceptedRequestIds.add(request.id);
         const duel = await api(`/api/duel/${request.duel_id}`).catch(() => null);
-        if (duel?.duel) {
+        if (duel?.duel?.status === "active") {
           toast(`${request.target_username} menerima duel.`);
           beginDuel(duel.duel);
         }
@@ -1463,6 +1497,14 @@ function beginDuel(duel) {
     return;
   }
 
+  if (state.renderedResultDuelId === duel.id) {
+    return;
+  }
+
+  if (duel.status && duel.status !== "active") {
+    return;
+  }
+
   // A single duel can arrive through more than one channel: matchmaking poll,
   // realtime broadcast, and invite polling. Do not restart the same duel,
   // because restarting calls renderQuestion() again and resets the timer to 10.
@@ -1482,12 +1524,7 @@ function beginDuel(duel) {
     return;
   }
 
-  clearResultCountdown();
-  clearMatchmakingWatcher();
-  clearDuelStartTimer();
-  clearInterval(state.duelTimer);
-  clearInterval(state.duelStatusTimer);
-  state.duelStatusTimer = null;
+  stopDuelRuntimeTimers();
   state.isMatchmaking = false;
   state.matchmakingPollBusy = false;
   state.currentQuestionKey = "";
@@ -1536,13 +1573,14 @@ async function recoverDuelStart(duel) {
 function startSyncedDuelCountdown() {
   clearDuelStartTimer();
   const duelId = state.duel?.id;
+  const sessionToken = state.duelSessionToken;
   const startsAtMs = new Date(state.duel?.starts_at || Date.now()).getTime();
   const delayMs = startsAtMs - serverNowMs();
 
   state.duelStartCountdownLastSecond = null;
 
   const startActiveQuestion = () => {
-    if (!state.duel?.id || state.duel.id !== duelId || state.renderedResultDuelId === duelId) return;
+    if (!isActiveDuelSession(duelId, sessionToken)) return;
     $("#duelResult").classList.add("is-hidden");
     $("#duelActive").classList.remove("is-hidden");
     setDuelTopMode("active");
@@ -1560,7 +1598,7 @@ function startSyncedDuelCountdown() {
   setDuelTopMode("result");
 
   const renderCountdown = () => {
-    if (!state.duel?.id || state.duel.id !== duelId || state.renderedResultDuelId === duelId) {
+    if (!isActiveDuelSession(duelId, sessionToken)) {
       clearDuelStartTimer();
       return;
     }
@@ -1618,15 +1656,31 @@ function applyOpponentAnswerPayload(payload = {}) {
 
 function startDuelStatusWatcher() {
   clearInterval(state.duelStatusTimer);
+  const duelId = state.duel?.id;
+  const sessionToken = state.duelSessionToken;
+  if (!duelId) return;
   state.duelStatusTimer = window.setInterval(() => {
-    refreshDuelStatus().catch(() => {});
+    if (!isActiveDuelSession(duelId, sessionToken)) {
+      clearInterval(state.duelStatusTimer);
+      state.duelStatusTimer = null;
+      return;
+    }
+    refreshDuelStatus({ duelId, sessionToken }).catch(() => {});
   }, 800);
 }
 
-async function refreshDuelStatus() {
-  if (!state.duel?.id) return;
-  const data = await api(`/api/duel/${state.duel.id}/status`);
+async function refreshDuelStatus({ duelId = state.duel?.id, sessionToken = state.duelSessionToken } = {}) {
+  if (!duelId || !isActiveDuelSession(duelId, sessionToken) || state.duelStatusBusy) return;
+  state.duelStatusBusy = true;
+  let data;
+  try {
+    data = await api(`/api/duel/${duelId}/status`);
+  } finally {
+    state.duelStatusBusy = false;
+  }
+  if (!isActiveDuelSession(duelId, sessionToken)) return;
   const status = data.status;
+  if (status?.duelId && status.duelId !== duelId) return;
   syncServerClock(status?.server_now);
   if (Array.isArray(status?.opponentAnswers)) {
     const byQuestion = new Map(status.opponentAnswers.map((answer) => [answer.questionId, Boolean(answer.isCorrect)]));
@@ -1639,8 +1693,8 @@ async function refreshDuelStatus() {
     state.duelOpponentAnswers = state.duelOpponentAnswers.map((value, index) => index < visible ? (value ?? "done") : null);
     renderDuelProgress();
   }
-  if (status?.status === "finished" && state.duel) {
-    await finishDuel({ fromSync: true, forceResult: true });
+  if (status?.status === "finished" && isCurrentDuelSession(duelId, sessionToken)) {
+    await finishDuel({ fromSync: true, forceResult: true, duelId, sessionToken });
   }
 }
 
@@ -1947,7 +2001,9 @@ function isValidQuestionImageUrl(value) {
 }
 
 function renderQuestion() {
-  if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+  const duelId = state.duel?.id;
+  const sessionToken = state.duelSessionToken;
+  if (!duelId || !isActiveDuelSession(duelId, sessionToken)) return;
 
   const question = state.duel.questions?.[state.duelIndex];
   if (!question?.id) {
@@ -2009,67 +2065,83 @@ function renderQuestion() {
     </button>
   `).join("");
 
-  state.duelTimer = setInterval(() => tickQuestion(timerToken), 1000);
+  state.duelTimer = setInterval(() => tickQuestion(timerToken, sessionToken, duelId), 1000);
 }
 
-function tickQuestion(timerToken) {
-  if (timerToken !== state.questionTimerToken || !state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+function tickQuestion(timerToken, sessionToken = state.duelSessionToken, duelId = state.duel?.id) {
+  if (timerToken !== state.questionTimerToken || !isActiveDuelSession(duelId, sessionToken)) return;
   state.remaining -= 1;
   $("#timerValue").textContent = String(Math.max(0, state.remaining));
   $(".timer-ring").style.setProperty("--progress", `${Math.max(0, state.remaining * 10)}%`);
   playSound("tick");
   if (state.remaining <= 0) {
     clearInterval(state.duelTimer);
-    answerQuestion(null, { timerToken });
+    answerQuestion(null, { timerToken, sessionToken, duelId, questionIndex: state.duelIndex });
   }
 }
 
-async function answerQuestion(option, { timerToken = state.questionTimerToken } = {}) {
-  if (timerToken !== state.questionTimerToken || state.answerLocked || !state.duel?.id) return;
+async function answerQuestion(option, { timerToken = state.questionTimerToken, sessionToken = state.duelSessionToken, duelId = state.duel?.id, questionIndex = state.duelIndex } = {}) {
+  if (timerToken !== state.questionTimerToken || state.answerLocked || !isActiveDuelSession(duelId, sessionToken)) return;
+  if (questionIndex !== state.duelIndex) return;
+
+  const question = state.duel.questions[questionIndex];
+  if (!question?.id) return;
+
   state.answerLocked = true;
   clearInterval(state.duelTimer);
   state.duelTimer = null;
-  const question = state.duel.questions[state.duelIndex];
-  const timeMs = Math.min(10000, Math.round(performance.now() - state.questionStartedAt));
+
+  const timeMs = Math.min(10000, Math.max(0, Math.round(performance.now() - state.questionStartedAt)));
   const isCorrect = option === question.correct_option;
-  state.duelUserAnswers[state.duelIndex] = isCorrect;
+  state.duelUserAnswers[questionIndex] = isCorrect;
   renderDuelProgress();
+
   $$(".answer-btn").forEach((btn) => {
     btn.disabled = true;
     if (btn.dataset.option === question.correct_option) btn.classList.add("correct");
     if (option && btn.dataset.option === option && !isCorrect) btn.classList.add("wrong");
   });
+
   playSound(isCorrect ? "correct" : "wrong");
-  const answerPayload = { duelId: state.duel.id, questionId: question.id, selectedOption: option, answerTimeMs: timeMs };
+
+  const answerPayload = {
+    duelId,
+    questionId: question.id,
+    position: questionIndex + 1,
+    selectedOption: option,
+    answerTimeMs: timeMs,
+  };
   state.duelAnswerPayloads.push(answerPayload);
   state.duelAnswerSaves.push(api("/api/duel/answer", {
     method: "POST",
     body: answerPayload,
   }).then(() => ({ ok: true })).catch((error) => ({ ok: false, error })));
+
   state.duelChannel?.send({
     type: "broadcast",
     event: "answer",
     payload: {
-      duelId: state.duel.id,
+      duelId,
       from: state.me?.id,
-      index: state.duelIndex,
+      index: questionIndex,
       questionId: question.id,
       isCorrect,
     },
   }).catch(() => {});
-  const answeredDuelId = state.duel.id;
-  window.setTimeout(async () => {
-    if (!state.duel?.id || state.duel.id !== answeredDuelId || state.renderedResultDuelId === answeredDuelId) return;
+
+  const advanceTimer = window.setTimeout(async () => {
+    state.duelAdvanceTimers = state.duelAdvanceTimers.filter((timer) => timer !== advanceTimer);
+    if (!isActiveDuelSession(duelId, sessionToken) || state.duelIndex !== questionIndex) return;
     state.currentQuestionKey = "";
-    state.duelIndex += 1;
+    state.duelIndex = questionIndex + 1;
     if (state.duelIndex >= state.duel.questions.length) {
-      await finishDuel();
+      await finishDuel({ duelId, sessionToken });
     } else {
       renderQuestion();
     }
   }, 120);
+  state.duelAdvanceTimers.push(advanceTimer);
 }
-
 function showDuelCalculatingResult(message = "Menghitung hasil duel...") {
   if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
   $("#duelActive")?.classList.add("is-hidden");
@@ -2117,10 +2189,9 @@ function restoreActiveQuestionAfterFinishError() {
   setDuelTopMode("active");
 }
 
-async function finishDuel({ fromSync = false, forceResult = false } = {}) {
-  if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
+async function finishDuel({ fromSync = false, forceResult = false, duelId = state.duel?.id, sessionToken = state.duelSessionToken } = {}) {
+  if (!duelId || !isActiveDuelSession(duelId, sessionToken)) return;
 
-  const duelId = state.duel.id;
   if (state.finishingDuelId === duelId) return;
 
   if (fromSync && !forceResult && localAnsweredCount() < state.duel.questions.length) {
@@ -2134,7 +2205,9 @@ async function finishDuel({ fromSync = false, forceResult = false } = {}) {
   let data;
   try {
     await flushDuelAnswerSaves();
+    if (!isActiveDuelSession(duelId, sessionToken)) return;
     data = await api("/api/duel/finish", { method: "POST", body: { duelId } });
+    if (!isCurrentDuelSession(duelId, sessionToken)) return;
   } catch (err) {
     state.finishingDuelId = null;
     if (/jawab semua pertanyaan/i.test(err.message || "")) {
@@ -2159,6 +2232,8 @@ async function finishDuel({ fromSync = false, forceResult = false } = {}) {
     if (!data || data.waiting) state.finishingDuelId = null;
   }
 
+  if (!isCurrentDuelSession(duelId, sessionToken)) return;
+
   if (data.waiting) {
     $("#duelActive").classList.add("is-hidden");
     $("#duelResult").classList.remove("is-hidden");
@@ -2173,9 +2248,15 @@ async function finishDuel({ fromSync = false, forceResult = false } = {}) {
   }
 
   const result = data.result;
-  if (state.renderedResultDuelId === duelId) return;
+  if (!isCurrentDuelSession(duelId, sessionToken) || state.renderedResultDuelId === duelId) return;
   state.renderedResultDuelId = duelId;
   state.finishingDuelId = null;
+  clearDuelAdvanceTimers();
+  clearInterval(state.duelTimer);
+  state.duelTimer = null;
+  state.answerLocked = true;
+  state.currentQuestionKey = "";
+  state.questionTimerToken += 1;
 
   const nextLifetimeFp = Number(state.me.lifetime_fp || 0) + Number(result.fpAwarded || 0);
   const nextWeeklyFp = Number(state.me.weekly_fp || 0) + Number(result.fpAwarded || 0);

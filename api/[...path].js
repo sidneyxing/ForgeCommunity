@@ -911,9 +911,30 @@ async function trimUserSessions(db, userId) {
 }
 
 async function cleanupDuelRequestHistory(db) {
+  await cleanupAcceptedFinishedDuelRequests(db);
   const now = Date.now();
   await db.from("duel_requests").delete().in("status", ["declined", "cancelled"]).lt("responded_at", new Date(now - 60 * 60 * 1000).toISOString());
   await db.from("duel_requests").delete().eq("status", "accepted").lt("responded_at", new Date(now - 10 * 60 * 1000).toISOString());
+}
+
+async function cleanupAcceptedFinishedDuelRequests(db) {
+  const rows = unwrap(await db
+    .from("duel_requests")
+    .select("id, duel_id")
+    .eq("status", "accepted")
+    .not("duel_id", "is", null)
+    .limit(100));
+  if (!rows.length) return;
+
+  const duelIds = [...new Set(rows.map((row) => row.duel_id).filter(Boolean))];
+  const activeDuels = duelIds.length
+    ? unwrap(await db.from("duels").select("id").in("id", duelIds).eq("status", "active"))
+    : [];
+  const activeDuelIds = new Set(activeDuels.map((duel) => duel.id));
+  const staleRequestIds = rows.filter((row) => !activeDuelIds.has(row.duel_id)).map((row) => row.id);
+  if (staleRequestIds.length) {
+    await db.from("duel_requests").update({ status: "cancelled", responded_at: new Date().toISOString() }).in("id", staleRequestIds);
+  }
 }
 
 async function cleanupMatchQueue(db) {
@@ -1077,13 +1098,35 @@ async function inviteDuelRequest(res, db, user, targetId) {
 
 async function duelRequests(res, db, user) {
   await cleanupExpiredDuelRequests(db);
-  const rows = unwrap(await db
+  let rows = unwrap(await db
     .from("duel_requests")
     .select("id, created_at, expires_at, requester_id, target_id, status, duel_id")
     .or(`target_id.eq.${user.id},requester_id.eq.${user.id}`)
     .in("status", ["pending", "accepted"])
     .order("created_at", { ascending: false })
     .limit(20));
+
+  // Jangan kirim lagi request accepted lama yang duel-nya sudah selesai/cancelled.
+  // Ini mencegah polling invite lama memanggil beginDuel() lagi setelah duel pertama selesai.
+  const acceptedDuelIds = [...new Set(rows
+    .filter((row) => row.status === "accepted" && row.duel_id)
+    .map((row) => row.duel_id))];
+  if (acceptedDuelIds.length) {
+    const activeDuels = unwrap(await db
+      .from("duels")
+      .select("id, status")
+      .in("id", acceptedDuelIds)
+      .eq("status", "active"));
+    const activeDuelIds = new Set(activeDuels.map((duel) => duel.id));
+    const staleAcceptedIds = rows
+      .filter((row) => row.status === "accepted" && row.duel_id && !activeDuelIds.has(row.duel_id))
+      .map((row) => row.id);
+    if (staleAcceptedIds.length) {
+      await db.from("duel_requests").update({ status: "cancelled", responded_at: new Date().toISOString() }).in("id", staleAcceptedIds);
+    }
+    rows = rows.filter((row) => row.status !== "accepted" || (row.duel_id && activeDuelIds.has(row.duel_id)));
+  }
+
   const requesterIds = [...new Set(rows.map((row) => row.requester_id))];
   const targetIds = [...new Set(rows.map((row) => row.target_id))];
   const userIds = [...new Set([...requesterIds, ...targetIds])];
@@ -1553,8 +1596,19 @@ async function answerDuel(req, res, db, user) {
   if (!isDuelParticipant(duel, user.id)) return send(res, 403, { error: "Kamu bukan participant duel ini." });
   const question = unwrap(await db.from("questions").select("*").eq("id", data.questionId).maybeSingle());
   if (!question) return send(res, 404, { error: "Soal tidak ditemukan." });
-  const linkedQuestion = unwrap(await db.from("duel_questions").select("duel_id").eq("duel_id", data.duelId).eq("question_id", data.questionId).maybeSingle());
+  const linkedQuestion = unwrap(await db.from("duel_questions").select("duel_id, position").eq("duel_id", data.duelId).eq("question_id", data.questionId).maybeSingle());
   if (!linkedQuestion) return send(res, 400, { error: "Soal ini bukan bagian dari duel." });
+
+  const clientPosition = Number(data.position || 0);
+  if (clientPosition && clientPosition !== Number(linkedQuestion.position || 0)) {
+    return send(res, 409, { error: "Urutan soal tidak cocok. Refresh duel lalu coba lagi." });
+  }
+
+  const startsAtMs = new Date(duel.starts_at || duel.started_at || Date.now()).getTime();
+  if (Date.now() + 750 < startsAtMs) {
+    return send(res, 400, { error: "Duel belum mulai. Jawaban terlalu cepat ditolak." });
+  }
+
   const selected = ["A", "B", "C", "D"].includes(data.selectedOption) ? data.selectedOption : null;
   const isCorrect = selected === question.correct_option;
   unwrap(await db.from("duel_answers").upsert({

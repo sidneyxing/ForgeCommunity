@@ -544,6 +544,24 @@ begin
    where (status = 'waiting' and last_seen_at < now() - interval '15 seconds')
       or (status = 'matched' and updated_at < now() - interval '2 minutes');
 
+  -- Clear old matched queue rows whose duel is no longer active.
+  -- Without this, the next duel can stay on the loading/matchmaking screen
+  -- because the user is still marked as matched to a finished duel.
+  update public.duel_queue q
+     set status = 'cancelled',
+         duel_id = null,
+         updated_at = now()
+   where q.status = 'matched'
+     and (
+       q.duel_id is null
+       or not exists (
+         select 1
+           from public.duels d
+          where d.id = q.duel_id
+            and d.status = 'active'
+       )
+     );
+
   select q.duel_id into v_existing_duel_id
     from public.duel_queue q
     join public.duels d on d.id = q.duel_id

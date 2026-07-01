@@ -1640,6 +1640,12 @@ async function settleDuel(db, duel) {
   }).eq("id", duel.id).eq("status", "active").select("id"));
   if (!updated.length) return {};
 
+  await db.from("duel_queue").update({
+    status: "cancelled",
+    duel_id: null,
+    updated_at: new Date().toISOString(),
+  }).in("user_id", [duel.user_id, duel.opponent_id].filter(Boolean)).eq("duel_id", duel.id);
+
   const newBadgesByUserId = {};
   const user = unwrap(await db.from("users").select("*").eq("id", duel.user_id).single());
   newBadgesByUserId[user.id] = await updateUserAfterDuel(db, user, result, userCorrect, userAnswers, userFp);

@@ -16,10 +16,13 @@ const state = {
   duelAnswerSaves: [],
   duelAnswerPayloads: [],
   finishingDuelId: null,
+  currentQuestionKey: "",
+  questionTimerToken: 0,
+  matchmakingPollBusy: false,
   answerLocked: false,
   duelTimer: null,
   resultCountdownTimer: null,
-  resultCountdown: 20,
+  resultCountdown: 120,
   questionStartedAt: 0,
   remaining: 10,
   audioReady: false,
@@ -773,6 +776,8 @@ function resetDuelProgress(duel) {
   state.duelAnswerSaves = [];
   state.duelAnswerPayloads = [];
   state.finishingDuelId = null;
+  state.currentQuestionKey = "";
+  state.questionTimerToken += 1;
   state.answerLocked = false;
   state.renderedResultDuelId = null;
   state.isMatchmaking = false;
@@ -843,6 +848,9 @@ function resetDuelToIdle() {
   state.duelAnswerSaves = [];
   state.duelAnswerPayloads = [];
   state.finishingDuelId = null;
+  state.currentQuestionKey = "";
+  state.questionTimerToken += 1;
+  state.matchmakingPollBusy = false;
   state.answerLocked = false;
   $("#duelIdle").classList.remove("is-hidden");
   $("#duelActive").classList.add("is-hidden");
@@ -858,7 +866,7 @@ function resetDuelToIdle() {
 
 function startResultCountdown() {
   clearResultCountdown();
-  state.resultCountdown = 20;
+  state.resultCountdown = 120;
   const button = $("#rematchCountdownBtn");
   const update = () => {
     if (button) button.textContent = `Cari Lawan Baru (${state.resultCountdown})`;
@@ -1448,18 +1456,42 @@ async function respondDuelRequest(button) {
 }
 
 function beginDuel(duel) {
-  syncServerClock(duel.server_now);
-  if (!Array.isArray(duel?.questions) || duel.questions.length < 5) {
+  syncServerClock(duel?.server_now);
+
+  if (!duel?.id) {
+    toast("Duel tidak valid dari server. Coba mulai ulang.");
+    return;
+  }
+
+  // A single duel can arrive through more than one channel: matchmaking poll,
+  // realtime broadcast, and invite polling. Do not restart the same duel,
+  // because restarting calls renderQuestion() again and resets the timer to 10.
+  if (state.duel?.id === duel.id && state.renderedResultDuelId !== duel.id) {
+    if (Array.isArray(duel.questions) && duel.questions.length >= 5 && (!Array.isArray(state.duel.questions) || state.duel.questions.length < 5)) {
+      state.duel.questions = duel.questions;
+    }
+    if (duel.status) state.duel.status = duel.status;
+    return;
+  }
+
+  if (!Array.isArray(duel.questions) || duel.questions.length < 5) {
     recoverDuelStart(duel).catch((err) => {
       resetDuelToIdle();
       toast(err.message || "Soal duel gagal dimuat. Coba mulai duel baru.");
     });
     return;
   }
+
   clearResultCountdown();
   clearMatchmakingWatcher();
   clearDuelStartTimer();
+  clearInterval(state.duelTimer);
+  clearInterval(state.duelStatusTimer);
+  state.duelStatusTimer = null;
   state.isMatchmaking = false;
+  state.matchmakingPollBusy = false;
+  state.currentQuestionKey = "";
+  state.questionTimerToken += 1;
   state.duel = duel;
   resetDuelProgress(state.duel);
   showPage("duel");
@@ -1502,17 +1534,24 @@ async function recoverDuelStart(duel) {
 }
 
 function startSyncedDuelCountdown() {
+  clearDuelStartTimer();
+  const duelId = state.duel?.id;
   const startsAtMs = new Date(state.duel?.starts_at || Date.now()).getTime();
   const delayMs = startsAtMs - serverNowMs();
 
   state.duelStartCountdownLastSecond = null;
 
-  if (delayMs <= 250) {
+  const startActiveQuestion = () => {
+    if (!state.duel?.id || state.duel.id !== duelId || state.renderedResultDuelId === duelId) return;
     $("#duelResult").classList.add("is-hidden");
     $("#duelActive").classList.remove("is-hidden");
     setDuelTopMode("active");
     playSound("matchStart", { overlap: true });
     renderQuestion();
+  };
+
+  if (delayMs <= 250) {
+    startActiveQuestion();
     return;
   }
 
@@ -1521,6 +1560,11 @@ function startSyncedDuelCountdown() {
   setDuelTopMode("result");
 
   const renderCountdown = () => {
+    if (!state.duel?.id || state.duel.id !== duelId || state.renderedResultDuelId === duelId) {
+      clearDuelStartTimer();
+      return;
+    }
+
     const nowMs = serverNowMs();
     const left = Math.max(1, Math.ceil((startsAtMs - nowMs) / 1000));
 
@@ -1538,11 +1582,7 @@ function startSyncedDuelCountdown() {
     if (serverNowMs() >= startsAtMs) {
       clearDuelStartTimer();
       state.duelStartCountdownLastSecond = null;
-      $("#duelResult").classList.add("is-hidden");
-      $("#duelActive").classList.remove("is-hidden");
-      setDuelTopMode("active");
-      playSound("matchStart", { overlap: true });
-      renderQuestion();
+      startActiveQuestion();
     }
   };
 
@@ -1862,22 +1902,30 @@ function showMatchmakingRoom(message = "Menunggu lawan online. Jangan tutup hala
 
 function startMatchmakingWatcher() {
   clearMatchmakingWatcher();
+  state.matchmakingPollBusy = false;
   state.matchmakingTimer = window.setInterval(async () => {
-    const data = await api("/api/duel/matchmaking/status").catch((err) => {
-      toast(err.message);
-      return null;
-    });
-    if (!data) return;
-    if (data.duel) {
-      state.isMatchmaking = false;
-      beginDuel(data.duel);
-      return;
-    }
-    if (data.cancelled) {
-      state.isMatchmaking = false;
-      clearMatchmakingWatcher();
-      resetDuelToIdle();
-      toast("Pencarian lawan dibatalkan atau sudah timeout.");
+    if (state.matchmakingPollBusy || state.duel?.id) return;
+    state.matchmakingPollBusy = true;
+    try {
+      const data = await api("/api/duel/matchmaking/status").catch((err) => {
+        toast(err.message);
+        return null;
+      });
+      if (!data) return;
+      if (data.duel) {
+        state.isMatchmaking = false;
+        clearMatchmakingWatcher();
+        beginDuel(data.duel);
+        return;
+      }
+      if (data.cancelled) {
+        state.isMatchmaking = false;
+        clearMatchmakingWatcher();
+        resetDuelToIdle();
+        toast("Pencarian lawan dibatalkan atau sudah timeout.");
+      }
+    } finally {
+      state.matchmakingPollBusy = false;
     }
   }, 1000);
 }
@@ -1899,9 +1947,27 @@ function isValidQuestionImageUrl(value) {
 }
 
 function renderQuestion() {
-  clearInterval(state.duelTimer);
+  if (!state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
 
-  const question = state.duel.questions[state.duelIndex];
+  const question = state.duel.questions?.[state.duelIndex];
+  if (!question?.id) {
+    showDuelCalculatingResult("Soal belum siap. Sedang mencoba sinkronisasi ulang.");
+    recoverDuelStart(state.duel).catch((err) => {
+      resetDuelToIdle();
+      toast(err.message || "Soal duel gagal dimuat. Coba mulai duel baru.");
+    });
+    return;
+  }
+
+  const questionKey = `${state.duel.id}:${state.duelIndex}:${question.id}`;
+  if (state.currentQuestionKey === questionKey) {
+    return;
+  }
+
+  clearInterval(state.duelTimer);
+  state.currentQuestionKey = questionKey;
+  const timerToken = ++state.questionTimerToken;
+
   const imageUrl = String(question.image_url ?? "").trim();
   const hasImage = isValidQuestionImageUrl(imageUrl);
 
@@ -1912,7 +1978,7 @@ function renderQuestion() {
 
   $("#timerValue").textContent = "10";
   $(".timer-ring").style.setProperty("--progress", "100%");
-  $("#questionCounter").textContent = `Soal ${state.duelIndex + 1}/5`;
+  $("#questionCounter").textContent = `Soal ${state.duelIndex + 1}/${state.duel.questions.length}`;
   $("#questionCategory").textContent = question.category;
 
   $("#questionText").classList.toggle("has-question-image", hasImage);
@@ -1943,23 +2009,26 @@ function renderQuestion() {
     </button>
   `).join("");
 
-  state.duelTimer = setInterval(tickQuestion, 1000);
+  state.duelTimer = setInterval(() => tickQuestion(timerToken), 1000);
 }
 
-function tickQuestion() {
+function tickQuestion(timerToken) {
+  if (timerToken !== state.questionTimerToken || !state.duel?.id || state.renderedResultDuelId === state.duel.id) return;
   state.remaining -= 1;
   $("#timerValue").textContent = String(Math.max(0, state.remaining));
   $(".timer-ring").style.setProperty("--progress", `${Math.max(0, state.remaining * 10)}%`);
   playSound("tick");
   if (state.remaining <= 0) {
-    answerQuestion(null);
+    clearInterval(state.duelTimer);
+    answerQuestion(null, { timerToken });
   }
 }
 
-async function answerQuestion(option) {
-  if (state.answerLocked) return;
+async function answerQuestion(option, { timerToken = state.questionTimerToken } = {}) {
+  if (timerToken !== state.questionTimerToken || state.answerLocked || !state.duel?.id) return;
   state.answerLocked = true;
   clearInterval(state.duelTimer);
+  state.duelTimer = null;
   const question = state.duel.questions[state.duelIndex];
   const timeMs = Math.min(10000, Math.round(performance.now() - state.questionStartedAt));
   const isCorrect = option === question.correct_option;
@@ -1988,7 +2057,10 @@ async function answerQuestion(option) {
       isCorrect,
     },
   }).catch(() => {});
+  const answeredDuelId = state.duel.id;
   window.setTimeout(async () => {
+    if (!state.duel?.id || state.duel.id !== answeredDuelId || state.renderedResultDuelId === answeredDuelId) return;
+    state.currentQuestionKey = "";
     state.duelIndex += 1;
     if (state.duelIndex >= state.duel.questions.length) {
       await finishDuel();
@@ -2134,7 +2206,7 @@ async function finishDuel({ fromSync = false, forceResult = false } = {}) {
       <article class="duel-result-card"><span>Weekly FP</span><strong>${fpDisplay(nextWeeklyFp)}</strong></article>
     </div>
     <div class="duel-result-actions">
-      <button class="btn primary" id="rematchCountdownBtn">Cari Lawan Baru (20)</button>
+      <button class="btn primary" id="rematchCountdownBtn">Cari Lawan Baru (120)</button>
       <button class="btn secondary" id="backHomeBtn">Kembali ke Beranda</button>
     </div>
   `;
